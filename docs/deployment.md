@@ -17,7 +17,14 @@
 | FastAPI | https://meet-again-ghbye-api.onrender.com | srv-dbnk8hqjnfac73ckg0mg |
 | API 문서 | https://meet-again-ghbye-api.onrender.com/docs | 위 API 서비스 |
 
-초기 배포는 두 서비스 모두 `live`로 확인했으며 공개 프론트엔드 HTTP 200과 API `/api/v1/health`의 샘플 모드 응답을 확인했습니다. 후속 변경은 같은 브랜치에서 배포하며 최종 확인 결과는 아래에 추가합니다.
+최종 애플리케이션 커밋: `20c18a292585583ae9641e190b965c8fc4568dce`.
+
+- API 배포 `dep-dbnke02vcj2c738gpot0`: live
+- 화면 배포 `dep-dbnke02vcj2c738gpoqg`: live
+- 공개 프론트엔드 HTTP 200, API `/api/v1/health`의 샘플 모드 응답 확인
+- 공개 배포 주소에서 Brave headless로 검색·후보 3건·상세·저장·불러오기·추가 질문 보완 확인
+- 공개 화면 390px 모바일 가로 넘침 없음, 페이지 JavaScript 오류 없음
+- 최종 백엔드 테스트 25개 통과, 프론트엔드 프로덕션 빌드 통과
 
 로컬 Brave headless 브라우저에서 검색 → 후보 3건 → 상세·점수 → 조건 저장 → 불러오기 → 누락 조건 질문 → 보완 후 검색을 확인했습니다. 390px 모바일 화면의 가로 넘침과 페이지 JavaScript 오류가 없었습니다. 카카오 실제 지도·Discord 실제 수신은 이 검증에 포함되지 않습니다.
 
