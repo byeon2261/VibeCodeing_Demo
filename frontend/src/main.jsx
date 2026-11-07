@@ -112,7 +112,7 @@ function App() {
       <header className="topbar"><span>다시 만나 <ChevronRight size={14}/> { {search:'구조동물 검색',saved:'저장한 검색',alerts:'알림 신청',history:'실행 이력'}[tab] }</span><span className="badge">{health ? health.mode === 'local' ? '샘플 데이터 모드' : '실제 API 모드' : '서버 확인 중'}</span></header>
       <div className="content">
         <div className="page-heading"><div className="eyebrow"><span/> 함께 찾는 소중한 가족</div><h1>{tab === 'search' ? <>다시 만날 수 있도록,<br/>작은 단서부터 찾아봐요.</> : tab === 'saved' ? '기억해 둔 검색 조건' : tab === 'alerts' ? '새로운 단서를 전해드려요.' : '검색이 걸어온 길'}</h1><p>{tab === 'search' ? '구조·보호 중인 동물 공고에서 우리 가족과 닮은 후보를 확인하세요.' : tab === 'saved' ? '저장해 둔 조건으로 다시 검색하거나 알림을 신청할 수 있어요.' : tab === 'alerts' ? '신청 후 직접 실행한 검색에서 조건에 맞는 후보를 찾으면 Discord DM으로 알려드려요.' : '도구 선택부터 검증과 수정까지, 실행 결과를 확인할 수 있어요.'}</p></div>
-        {health?.mode === 'local' && <div className="notice"><ShieldCheck size={18}/><span>지금은 <b>생성된 샘플 데이터</b>를 사용합니다. 실제 동물·보호센터 공고가 아니며 알림을 발송하지 않습니다.</span></div>}
+        {health?.mode === 'local' && <div className="notice"><ShieldCheck size={18}/><span>지금은 <b>생성된 샘플 데이터</b>를 사용합니다. 실제 공고가 아니며 알림을 발송하지 않습니다. 공개 샘플 환경의 기록은 서버 재시작 시 초기화될 수 있습니다.</span></div>}
         {error && <div className="error" role="alert">{error}<button aria-label="오류 닫기" onClick={() => setError('')}><X size={16}/></button></div>}
 
         {tab === 'search' && <>

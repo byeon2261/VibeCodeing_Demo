@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-07T15:25:55.428270+00:00",
+  "generated_at": "2026-11-07T15:41:22.762388+00:00",
   "dataset": "7 fixed synthetic scenarios; one run per mode; no real API or LLM",
   "limitations": "Not real-world accuracy. Zero tokens reflect rule planner. Timings are local and not statistically significant.",
   "results": [
@@ -11,7 +11,7 @@
       "passed": true,
       "corrections": 0,
       "tool_calls": 7,
-      "elapsed_ms": 16,
+      "elapsed_ms": 0,
       "tokens": 0
     },
     {
@@ -99,7 +99,7 @@
       "passed": true,
       "corrections": 1,
       "tool_calls": 8,
-      "elapsed_ms": 204,
+      "elapsed_ms": 219,
       "tokens": 0
     },
     {
@@ -110,7 +110,7 @@
       "passed": true,
       "corrections": 1,
       "tool_calls": 7,
-      "elapsed_ms": 15,
+      "elapsed_ms": 0,
       "tokens": 0
     },
     {
@@ -154,7 +154,7 @@
       "passed": true,
       "corrections": 2,
       "tool_calls": 3,
-      "elapsed_ms": 625,
+      "elapsed_ms": 610,
       "tokens": 0
     }
   ]

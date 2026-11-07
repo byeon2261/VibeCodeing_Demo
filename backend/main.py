@@ -4,7 +4,7 @@ import secrets
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from uuid import uuid4
+from uuid import uuid4, uuid5, NAMESPACE_URL
 from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -172,12 +172,12 @@ def create_app(settings=None, store=None, tools=None, planner=None, sender=None)
             raise HTTPException(404, "저장한 검색이 없습니다.")
         if not sender.allowed(body.recipient):
             raise HTTPException(503, "Discord Bot과 동의받은 수신자 허용 목록을 서버에 설정해 주세요.")
-        key = str(uuid4())
+        key = str(uuid5(NAMESPACE_URL, body.saved_search_id + ":discord:" + body.recipient))
         data = {**body.model_dump(), "active": True, "created_at": now()}
         for sub in await store.list(identity, "subscription"):
             if sub["saved_search_id"] == body.saved_search_id and sub["recipient"] == body.recipient and sub.get("active"):
                 return {"id": sub["id"], "active": True, "channel": body.channel}
-        await store.put(identity, "subscription", key, data)
+        await store.put(identity, "subscription", key, data, create_only=True)
         return {"id": key, "active": True, "channel": body.channel}
 
     @api.get("/subscriptions")
