@@ -1,0 +1,161 @@
+{
+  "generated_at": "2026-11-07T15:25:55.428270+00:00",
+  "dataset": "7 fixed synthetic scenarios; one run per mode; no real API or LLM",
+  "limitations": "Not real-world accuracy. Zero tokens reflect rule planner. Timings are local and not statistically significant.",
+  "results": [
+    {
+      "reflection": false,
+      "scenario": "none",
+      "status": "completed",
+      "expected": "completed",
+      "passed": true,
+      "corrections": 0,
+      "tool_calls": 7,
+      "elapsed_ms": 16,
+      "tokens": 0
+    },
+    {
+      "reflection": false,
+      "scenario": "timeout",
+      "status": "failed",
+      "expected": "completed",
+      "passed": false,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": false,
+      "scenario": "duplicate",
+      "status": "failed",
+      "expected": "completed",
+      "passed": false,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": false,
+      "scenario": "mismatch",
+      "status": "failed",
+      "expected": "completed",
+      "passed": false,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": false,
+      "scenario": "empty",
+      "status": "completed",
+      "expected": "completed",
+      "passed": true,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": false,
+      "scenario": "auth",
+      "status": "failed",
+      "expected": "failed",
+      "passed": true,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": false,
+      "scenario": "always_timeout",
+      "status": "failed",
+      "expected": "failed",
+      "passed": true,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": true,
+      "scenario": "none",
+      "status": "completed",
+      "expected": "completed",
+      "passed": true,
+      "corrections": 0,
+      "tool_calls": 7,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": true,
+      "scenario": "timeout",
+      "status": "completed",
+      "expected": "completed",
+      "passed": true,
+      "corrections": 1,
+      "tool_calls": 8,
+      "elapsed_ms": 204,
+      "tokens": 0
+    },
+    {
+      "reflection": true,
+      "scenario": "duplicate",
+      "status": "completed",
+      "expected": "completed",
+      "passed": true,
+      "corrections": 1,
+      "tool_calls": 7,
+      "elapsed_ms": 15,
+      "tokens": 0
+    },
+    {
+      "reflection": true,
+      "scenario": "mismatch",
+      "status": "completed",
+      "expected": "completed",
+      "passed": true,
+      "corrections": 1,
+      "tool_calls": 7,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": true,
+      "scenario": "empty",
+      "status": "completed",
+      "expected": "completed",
+      "passed": true,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": true,
+      "scenario": "auth",
+      "status": "failed",
+      "expected": "failed",
+      "passed": true,
+      "corrections": 0,
+      "tool_calls": 1,
+      "elapsed_ms": 0,
+      "tokens": 0
+    },
+    {
+      "reflection": true,
+      "scenario": "always_timeout",
+      "status": "failed",
+      "expected": "failed",
+      "passed": true,
+      "corrections": 2,
+      "tool_calls": 3,
+      "elapsed_ms": 625,
+      "tokens": 0
+    }
+  ]
+}
