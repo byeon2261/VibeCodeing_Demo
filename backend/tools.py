@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -14,6 +15,16 @@ logger = logging.getLogger(__name__)
 SPECIES = {"dog": "417000", "cat": "422400", "other": "429900"}
 REGIONS = {"서울특별시": "6110000", "부산광역시": "6260000", "대구광역시": "6270000", "인천광역시": "6280000", "광주광역시": "6290000", "대전광역시": "6300000", "울산광역시": "6310000", "세종특별자치시": "5690000", "경기도": "6410000", "강원특별자치도": "6530000", "충청북도": "6430000", "충청남도": "6440000", "전북특별자치도": "6540000", "전라남도": "6460000", "경상북도": "6470000", "경상남도": "6480000", "제주특별자치도": "6500000"}
 ALIASES = {"서울": "서울특별시", "부산": "부산광역시", "경기": "경기도", "강원": "강원특별자치도", "전북": "전북특별자치도", "제주": "제주특별자치도"}
+
+
+def has_location_coordinates(location):
+    coordinates = location.get("coordinates") if isinstance(location, dict) else None
+    if not isinstance(coordinates, dict):
+        return False
+    lat, lng = coordinates.get("lat"), coordinates.get("lng")
+    return (type(lat) in (int, float) and type(lng) in (int, float)
+            and -90 <= lat <= 90 and -180 <= lng <= 180
+            and math.isfinite(lat) and math.isfinite(lng))
 
 
 class ToolError(Exception):
@@ -113,20 +124,45 @@ class AnimalTools:
         return {key: candidate[key] for key in ("shelter_name", "shelter_phone", "shelter_address")}
 
     async def location(self, candidate):
-        address = candidate.get("shelter_address")
-        if candidate.get("sample") or not address or not self.settings.kakao_rest_api_key:
-            return {"address": address, "coordinates": None, "reason": "샘플 또는 카카오 REST 키/주소 미설정"}
+        address = (candidate.get("shelter_address") or "").strip()
+        unavailable = {"address": address, "coordinates": None}
+        if candidate.get("sample"):
+            return {**unavailable, "reason_code": "sample", "reason": "샘플 공고의 보호센터 위치는 지도에 표시하지 않습니다."}
+        if not address or address == "None":
+            return {**unavailable, "reason_code": "address_missing", "reason": "공고에 보호센터 주소가 등록되어 있지 않습니다."}
+        if not self.settings.kakao_rest_api_key:
+            return {**unavailable, "reason_code": "not_configured", "reason": "지도 연결이 준비되지 않았습니다. 주소 링크로 보호센터 위치를 확인해 주세요."}
         try:
             async with httpx.AsyncClient(timeout=8) as client:
                 r = await client.get("https://dapi.kakao.com/v2/local/search/address.json", params={"query": address}, headers={"Authorization": "KakaoAK " + self.settings.kakao_rest_api_key})
+            if r.status_code in (401, 403):
+                raise ToolError("location_auth", "지도 서비스에 연결하지 못했습니다. 주소 링크로 위치를 확인해 주세요.")
+            if r.status_code == 429:
+                raise ToolError("location_rate_limit", "지도 조회 요청이 많습니다. 잠시 후 다시 시도해 주세요.", True)
             r.raise_for_status()
-            docs = r.json()["documents"]
+            payload = r.json()
+            docs = payload["documents"]
+            if not isinstance(docs, list):
+                raise ValueError("invalid documents")
             if not docs:
-                return {"address": address, "coordinates": None, "reason": "주소 변환 결과 없음"}
+                return {**unavailable, "reason_code": "address_not_found", "reason": "등록된 보호센터 주소의 좌표를 찾지 못했습니다. 주소 링크로 확인해 주세요."}
+            meta = payload.get("meta") or {}
+            if not isinstance(meta, dict):
+                raise ValueError("invalid meta")
+            if len(docs) > 1 or int(meta.get("total_count", len(docs))) > 1:
+                return {**unavailable, "reason_code": "address_ambiguous", "reason": "주소 검색 결과가 여러 곳입니다. 보호센터에 정확한 위치를 확인해 주세요."}
             x, y = docs[0]["x"], docs[0]["y"]
-            return {"address": address, "coordinates": {"lat": float(y), "lng": float(x)}, "source": "Kakao Local", "fetched_at": now(), "map_url": f"https://map.kakao.com/link/map/{quote(candidate['shelter_name'])},{y},{x}"}
-        except (httpx.HTTPError, KeyError, ValueError, TypeError) as exc:
-            raise ToolError("location", "카카오 주소 변환 실패: 주소 텍스트를 확인하세요.") from exc
+            location = {"address": address, "coordinates": {"lat": float(y), "lng": float(x)}, "source": "Kakao Local", "fetched_at": now()}
+            if not has_location_coordinates(location):
+                raise ValueError("invalid coordinates")
+            location["map_url"] = f"https://map.kakao.com/link/map/{quote(candidate.get('shelter_name') or '보호센터', safe='')},{location['coordinates']['lat']},{location['coordinates']['lng']}"
+            return location
+        except httpx.TimeoutException as exc:
+            raise ToolError("location_timeout", "보호센터 위치 조회 시간이 초과되었습니다. 다시 시도해 주세요.", True) from exc
+        except httpx.HTTPError as exc:
+            raise ToolError("location_network", "보호센터 위치를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", True) from exc
+        except (KeyError, ValueError, TypeError, IndexError, OverflowError) as exc:
+            raise ToolError("location_response", "보호센터 좌표를 확인하지 못했습니다. 주소 링크로 위치를 확인해 주세요.") from exc
 
 
 class Planner:

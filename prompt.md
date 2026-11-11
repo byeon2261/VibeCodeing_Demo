@@ -2,7 +2,7 @@
 
 당신은 우리 팀의 Python 백엔드·React 프론트엔드·LangGraph 에이전트 설계와 구현을 돕는 개발 파트너다. 아래 요구사항을 기준으로 실제 동작하는 데모 서비스를 단계적으로 구현하라. 설계 설명만 제공하지 말고, 확인된 범위의 코드 작성·실행·검증·배포 준비까지 진행하라.
 
-최신 배포 기준: Redis 쿠키 인증 도입 후 Vercel의 `VITE_API_BASE_URL`은 `/api/v1`이다. 이전 항목의 Render 절대 URL 안내는 18번 이후 설정으로 대체한다. 로컬 구현과 실제 배포 상태는 구분하며, 21번에 마지막 원격 진단 결과와 배포에 필요한 조치를 기록한다.
+최신 배포 기준: Redis 쿠키 인증 도입 후 Vercel의 `VITE_API_BASE_URL`은 `/api/v1`이다. 이전 항목의 Render 절대 URL 안내는 18번 이후 설정으로 대체한다. 로컬 구현과 실제 배포 상태는 구분하며, 23번에 최근 Redis 오류와 설정 안내를, 24번에 보호센터 지도 기능을 기록한다. 21~22번의 원격 상태는 각 확인 당시의 진단 이력이다.
 
 ## 1. 프로젝트 정보와 목표
 
@@ -708,3 +708,35 @@ AUTH_COOKIE_SAMESITE=lax
 이번 진단에서는 원격 환경변수 변경·Git push·Vercel/Render 재배포를 수행하지 않았다. 로컬 프록시 설정은 준비되어 있으나 실제 배포 반영은 남아 있다.
 
 참고: [Vercel rewrites](https://vercel.com/docs/routing/rewrites), [Vercel 배포 환경](https://vercel.com/docs/deployments/environments), [Render 환경변수 반영](https://render.com/docs/configure-environment-variables).
+
+## 22. 최신 프론트·백엔드 재배포 확인 (2026-11-11)
+
+- GitHub 원격 브랜치 확인: `main`은 최신 기능을 포함한 `51b68594e898ce40a9a499701d4c3ffa1615814e`, `codex/meet-again-demo`는 이전 `4b7bfaaddb70521c4d3937749d9908890a830254`다.
+- Vercel 운영 주소 `https://vibe-codeing-demo.vercel.app/`는 200이고 공개 번들 `/assets/index-CYAeAI5c.js`에 최신 인증 이벤트와 `/api/v1` 상대 경로가 포함되어 있다. `/login`도 HTML 200이다. 프론트엔드 최신 로그인 기능 반영을 확인했지만 Vercel 내부 배포 커밋 메타데이터를 직접 조회한 것은 아니다.
+- Vercel 운영 주소의 `/api/v1/health`가 Render의 JSON 200을 반환한다. 앞서 21번에서 확인한 운영 프록시 404는 해결되었다.
+- Render의 최근 배포 `dep-dbq0lgmk1f9s73d8jd50`는 live이며 2026-11-11 15:28:20 KST에 완료되었다. 그러나 배포 커밋은 여전히 `4b7bfaa`다. 재배포 성공과 최신 코드 반영은 구분한다.
+- Render의 실제 연결 브랜치는 여전히 `codex/meet-again-demo`, 자동 배포는 on commit이다. `main`에 푸시한 최신 코드는 이 설정으로 자동 배포되지 않는다.
+- Render와 Vercel 프록시 모두 `/api/v1/auth/me`는 404다. Render `/openapi.json`에 `/auth/*` 경로는 없고 기존 `/api/v1/sessions`가 남아 있어 이전 백엔드 코드임을 교차 확인했다. health에는 아직 `animal_data_source` 필드도 없다.
+- 조치: Render `meet-again-ghbye-api`의 Settings에서 배포 Branch를 최신 기능이 있는 `main`으로 변경하고 `Manual Deploy → Deploy latest commit`을 실행하거나, 기존 배포 브랜치에 최신 코드를 반영한다. 신규 인증 코드가 올라갈 때 운영용 Redis URL도 준비되어 있어야 한다. 기존 OpenAI·동물 API·Supabase 설정은 보존한다.
+- 사용자에게 배포 확인을 요청받은 이번 작업에서는 읽기 전용으로 상태를 확인하고 문서를 갱신했다. 배포 브랜치 변경·원격 재배포는 실행하지 않았다.
+
+## 23. 최신 배포 후 Redis 로그인 503 및 URL 형식 오류 (2026-11-11)
+
+- 22번 이후 확인에서 Render 연결 브랜치가 main으로 변경되었고, 최신 커밋 `51b6859`의 배포 `dep-dbq0p48n74is739c4mg0`가 2026-11-11 15:36:04 KST에 live가 되었다. `animal_data_source=api`와 인증 경로가 반영되었다.
+- 당시 운영 Vercel `https://vibe-codeing-demo.vercel.app/`에서 health·regions는 200, 비로그인 auth/me는 401이었다. 로그인 요청은 503과 Redis 오류 처리 메시지를 반환했다. 백엔드 최신 코드 미반영 문제와 Redis 연결 실패는 별개다.
+- 사용자는 기존 무료 `house-tour-notes-kv`를 이 프로젝트와 공유하도록 명시적으로 선택했다. Redis 키는 기존 코드의 `meet-again:auth:` 접두사로 구분하며 두 프로젝트는 인스턴스 메모리·연결 한도를 공유한다. Redis 인스턴스 설정이나 기존 데이터를 변경하지 않는다.
+- Render 연결 도구는 내부 연결 URL을 반환하지 않았다. 대시보드 확인을 위한 브라우저 자동화도 현재 URL 확인 불가로 중단되어 실제 REDIS_URL 변경은 완료하지 못했다. 연결 성공으로 보고하지 않는다.
+- 이후 사용자가 REDIS_URL에 `74.220.52.0/24`, `74.220.60.0/24`를 입력한 뒤 `Redis URL must specify one of the following schemes (redis://, rediss://, unix://)` 기동 오류를 보고했다. 두 값은 IP 대역을 표현하는 CIDR이며 Redis 서버 접속 URL이 아니다. 제공된 traceback에서 Redis.from_url이 URL을 해석하는 단계에 실패한 것을 확인했다.
+- 수정 절차: Render의 **house-tour-notes-kv** 상세 화면 오른쪽 위 **Connect → Internal URL**을 복사하고, **meet-again-ghbye-api → Environment → REDIS_URL**의 값을 복사한 URL 한 개로 교체한다. Value에는 `REDIS_URL=` 없이 URL 전체만 넣고 줄바꿈을 넣지 않는다. 인증 정보가 있는 URL이라면 이를 포함해 정확히 복사하되 채팅·Git·문서에 기록하지 않는다.
+- 내부 URL의 형태는 `redis://<실제 내부 호스트>:6379`이며 이 문자열은 형태 예시다. 실제 값은 대시보드에서 복사한다. IP 대역 앞에 redis://만 붙이거나 백엔드의 Outbound IP Addresses를 복사하지 않는다.
+- 값을 수정한 뒤 Save, rebuild, and deploy를 실행하고 운영 주소에서 로그인한다. 내부 접속을 위해 외부 IP 허용 목록을 변경할 필요는 없다. 실제 Redis 연결 성공과 로그인 완료는 수정 후 별도로 검증해야 한다.
+
+참고: [Render Key Value 연결 URL 확인](https://render.com/docs/key-value#obtaining-connection-urls).
+
+## 24. 동물 상세 팝업의 보호센터 카카오 지도 표시 (2026-11-11)
+
+- 상세 팝업에서 후보 순위와 관계없이 `GET /api/v1/runs/{run_id}/candidates/{candidate_id}/location`으로 선택한 보호센터 위치를 조회한다. 주소는 클라이언트 입력이 아니라 로그인 사용자의 저장된 검색 결과에서 읽고, 성공한 좌표만 같은 실행 이력에 캐시한다. 다른 사용자의 결과·없는 후보는 404, 카카오 오류는 502로 응답하며 오류는 캐시하지 않는다.
+- 백엔드는 카카오 로컬 주소 검색(REST 키, 서버 전용)으로 좌표를 구한다. 샘플 공고, 주소 누락, 검색 결과 없음·여러 건, 범위를 벗어나거나 숫자가 아닌 좌표는 임의 마커로 대체하지 않고 사유 코드를 반환한다.
+- 프론트엔드는 `ShelterMap.jsx`·`kakaoMaps.js`로 지도·마커·확대/축소 컨트롤·재시도 버튼을 표시한다. 카카오 JavaScript SDK는 페이지당 한 번 로드해 재사용하고, 키가 없거나 로딩에 실패하면 카카오맵 주소 링크로 대체한다.
+- 설정: Vercel `VITE_KAKAO_JS_KEY`(JavaScript 키), Render `KAKAO_REST_API_KEY`(REST 키), 카카오 앱 JavaScript SDK 도메인에 실제 프론트 origin 등록, 카카오맵 사용 설정 ON. 실제 키 값은 문서·Git에 기록하지 않는다.
+- 검증: 프론트 `npm test`(SDK 로더 4건) 통과를 확인했다. 백엔드 `tests/test_locations.py`를 포함한 pytest와 프론트 빌드는 사용자 Windows 환경에서 실행한 뒤 통과 시에만 커밋·푸시한다. 운영 지도 표시는 배포 후 별도로 확인해야 한다.

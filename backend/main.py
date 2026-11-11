@@ -12,7 +12,7 @@ from backend.graph import build_graph, initial_state
 from backend.models import SearchRequest, SavedSearch, SubscriptionRequest, MemoryUpdate, Conditions
 from backend.notifications import DiscordSender, notify_matches
 from backend.storage import SQLiteStore, SupabaseStore, StoreError, now
-from backend.tools import AnimalTools, Planner, ToolError, today_seoul, ALIASES
+from backend.tools import AnimalTools, Planner, ToolError, today_seoul, ALIASES, has_location_coordinates
 from backend.auth import AuthService, auth_router
 
 
@@ -130,6 +130,27 @@ def create_app(settings=None, store=None, tools=None, planner=None, sender=None,
         if not result:
             raise HTTPException(404, "실행 이력이 없습니다.")
         return result
+
+    @api.get("/runs/{run_id}/candidates/{candidate_id}/location")
+    async def candidate_location(run_id: str, candidate_id: str, identity=Depends(owner)):
+        # Read the address from this user's stored result, never from a client-supplied address.
+        rate_limit("location:" + identity)
+        async with locks["location:" + identity]:
+            result = await store.get(identity, "run", run_id)
+            if not result:
+                raise HTTPException(404, "실행 이력이 없습니다.")
+            candidate = next((c for c in result.get("candidates", []) if c["id"] == candidate_id), None)
+            if candidate is None:
+                raise HTTPException(404, "검색 결과에 해당 동물 공고가 없습니다.")
+            cached = candidate.get("location")
+            address = (candidate.get("shelter_address") or "").strip()
+            if not candidate.get("sample") and has_location_coordinates(cached) and cached.get("address") == address:
+                return cached
+            location = await tools.location(candidate)
+            if has_location_coordinates(location):
+                candidate["location"] = location
+                await store.put(identity, "run", run_id, result)
+            return location
 
     @api.get("/saved-searches")
     async def saved_searches(identity=Depends(owner)):

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { PawPrint, Search, Bookmark, Bell, Activity, ArrowRight, MapPin, Phone, X, Check, ChevronRight, RefreshCw, SlidersHorizontal, ShieldCheck, ExternalLink, Heart, LoaderCircle, LogIn, LogOut } from 'lucide-react';
 import { api, post, currentUser } from './api';
 import AuthPage from './AuthPage';
+import ShelterMap from './ShelterMap';
 import './style.css';
 
 function localDate(offset = 0) {
@@ -12,35 +13,6 @@ function localDate(offset = 0) {
 const empty = () => ({ region: '', species: '', start_date: localDate(-14), end_date: localDate(), breed: '', color: '', features: '' });
 const names = { dog: '강아지', cat: '고양이', other: '기타 동물', all: '전체' };
 const statuses = { completed: '검색 완료', partial: '일부 결과', failed: '확인 필요', awaiting_input: '추가 입력 필요' };
-
-function MapView({ candidate }) {
-  const ref = useRef(null);
-  const [error, setError] = useState('');
-  const coordinates = candidate.location?.coordinates;
-  useEffect(() => {
-    const key = import.meta.env.VITE_KAKAO_JS_KEY;
-    if (!key || !coordinates) return;
-    let cancelled = false;
-    const initialize = () => window.kakao.maps.load(() => {
-      if (cancelled || !ref.current) return;
-      const center = new window.kakao.maps.LatLng(coordinates.lat, coordinates.lng);
-      const map = new window.kakao.maps.Map(ref.current, { center, level: 4 });
-      new window.kakao.maps.Marker({ map, position: center });
-    });
-    let script;
-    if (window.kakao?.maps) initialize();
-    else {
-      script = document.createElement('script');
-      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`;
-      script.onload = initialize;
-      script.onerror = () => setError('카카오맵을 불러오지 못했습니다.');
-      document.head.appendChild(script);
-    }
-    return () => { cancelled = true; if (script) script.remove(); };
-  }, [coordinates?.lat, coordinates?.lng]);
-  if (!coordinates || !import.meta.env.VITE_KAKAO_JS_KEY) return <div className="map-empty"><MapPin size={28}/><span>보호센터 위치</span><small>{candidate.shelter_address || '등록된 주소가 없습니다.'}</small></div>;
-  return <><div ref={ref} className="map"/>{error && <p role="alert">{error}</p>}</>;
-}
 
 function SearchApp({ user, checkingAuth, navigate, logout }) {
   const [tab, setTab] = useState('search');
@@ -150,7 +122,7 @@ function SearchApp({ user, checkingAuth, navigate, logout }) {
       </div>
     </main>
     {toast && <div className="toast" role="status"><Check size={18}/>{toast}</div>}
-    {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><section className="modal" role="dialog" aria-modal="true" aria-label="공고 상세" onClick={e => e.stopPropagation()}><button autoFocus className="modal-close" aria-label="상세 닫기" onClick={() => setSelected(null)}><X/></button><span className="eyebrow">{selected.sample ? '가상 샘플 공고' : selected.notice_no}</span><h2>{selected.breed}</h2><p>{selected.features || '등록된 특징 없음'}</p>{selected.image_url && <img className="detail-image" src={selected.image_url} alt={selected.breed}/>}<div className="detail-grid"><div><small>발견 일자</small><b>{selected.found_date}</b></div><div><small>공고 상태</small><b>{selected.status || '정보 없음'}</b></div></div><h3>비교한 단서 · {selected.score}점</h3>{selected.matches.map((x,i) => <p className="green" key={i}>일치 · {x}</p>)}{selected.mismatches.map((x,i) => <p key={i}>불일치/부분 일치 · {x}</p>)}{selected.unknown.map((x,i) => <p className="muted" key={i}>미확인 · {x}</p>)}<p className="muted">단순 문자열·가중치 점수이며 동일 개체의 확률이 아닙니다.</p><h3>구조 위치</h3><p>{selected.found_place || '위치 정보 없음'}</p>{!selected.sample && selected.found_place && <a className="text-button" target="_blank" rel="noreferrer" href={`https://map.kakao.com/link/search/${encodeURIComponent(selected.found_place)}`}>카카오맵에서 구조 장소 검색 <ExternalLink size={14}/></a>}<h3>보호센터 · {selected.shelter_name || '미상'}</h3><MapView candidate={selected}/>{selected.shelter_phone && <a className="primary" href={`tel:${selected.shelter_phone.replace(/[^0-9+]/g, '')}`}><Phone size={16}/>{selected.shelter_phone}</a>}{!selected.sample && selected.shelter_address && <a className="secondary" href={selected.location?.map_url || `https://map.kakao.com/link/search/${encodeURIComponent(selected.shelter_address)}`} target="_blank" rel="noreferrer"><MapPin size={16}/>보호센터 위치 확인</a>}<p className="muted">조회 시각 {new Date(selected.fetched_at).toLocaleString('ko-KR')}</p><a href={selected.source_url} target="_blank" rel="noreferrer" className="text-button">공식 출처 확인 <ExternalLink size={14}/></a></section></div>}
+    {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><section className="modal" role="dialog" aria-modal="true" aria-label="공고 상세" onClick={e => e.stopPropagation()}><button autoFocus className="modal-close" aria-label="상세 닫기" onClick={() => setSelected(null)}><X/></button><span className="eyebrow">{selected.sample ? '가상 샘플 공고' : selected.notice_no}</span><h2>{selected.breed}</h2><p>{selected.features || '등록된 특징 없음'}</p>{selected.image_url && <img className="detail-image" src={selected.image_url} alt={selected.breed}/>}<div className="detail-grid"><div><small>발견 일자</small><b>{selected.found_date}</b></div><div><small>공고 상태</small><b>{selected.status || '정보 없음'}</b></div></div><h3>비교한 단서 · {selected.score}점</h3>{selected.matches.map((x,i) => <p className="green" key={i}>일치 · {x}</p>)}{selected.mismatches.map((x,i) => <p key={i}>불일치/부분 일치 · {x}</p>)}{selected.unknown.map((x,i) => <p className="muted" key={i}>미확인 · {x}</p>)}<p className="muted">단순 문자열·가중치 점수이며 동일 개체의 확률이 아닙니다.</p><h3>구조 위치</h3><p>{selected.found_place || '위치 정보 없음'}</p>{!selected.sample && selected.found_place && <a className="text-button" target="_blank" rel="noreferrer" href={`https://map.kakao.com/link/search/${encodeURIComponent(selected.found_place)}`}>카카오맵에서 구조 장소 검색 <ExternalLink size={14}/></a>}<h3>보호센터 · {selected.shelter_name || '미상'}</h3><ShelterMap key={selected.id} candidate={selected} runId={result?.run_id}/>{selected.shelter_phone && <a className="primary" href={`tel:${selected.shelter_phone.replace(/[^0-9+]/g, '')}`}><Phone size={16}/>{selected.shelter_phone}</a>}<p className="muted">조회 시각 {new Date(selected.fetched_at).toLocaleString('ko-KR')}</p><a href={selected.source_url} target="_blank" rel="noreferrer" className="text-button">공식 출처 확인 <ExternalLink size={14}/></a></section></div>}
   </div>;
 }
 function App() {
