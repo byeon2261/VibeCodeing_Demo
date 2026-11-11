@@ -1,34 +1,61 @@
 import asyncio
-import hashlib
-import secrets
 import time
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from uuid import uuid4, uuid5, NAMESPACE_URL
-from fastapi import FastAPI, APIRouter, Depends, Header, HTTPException, Request
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from backend.config import get_settings
 from backend.graph import build_graph, initial_state
 from backend.models import SearchRequest, SavedSearch, SubscriptionRequest, MemoryUpdate, Conditions
 from backend.notifications import DiscordSender, notify_matches
 from backend.storage import SQLiteStore, SupabaseStore, StoreError, now
 from backend.tools import AnimalTools, Planner, ToolError, today_seoul, ALIASES
+from backend.auth import AuthService, auth_router
 
 
-def create_app(settings=None, store=None, tools=None, planner=None, sender=None):
+def create_app(settings=None, store=None, tools=None, planner=None, sender=None, redis_client=None):
     settings = settings or get_settings()
     store = store or (SupabaseStore(settings) if settings.storage_backend == "supabase" else SQLiteStore(settings.sqlite_path))
     tools = tools or AnimalTools(settings)
     planner = planner or Planner(settings)
     sender = sender or DiscordSender(settings)
     graph = build_graph(settings, tools, planner)
+    auth = AuthService(settings, store, redis_client)
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        await auth.close()
     locks = defaultdict(asyncio.Lock)
     rate_windows = defaultdict(deque)
-    app = FastAPI(title="다시 만나 API", version="0.1.0")
+    app = FastAPI(title="다시 만나 API", version="0.2.0", lifespan=lifespan)
     app.state.store, app.state.graph = store, graph
-    app.add_middleware(CORSMiddleware, allow_origins=[s.strip() for s in settings.cors_origins.split(",")], allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Authorization", "Content-Type"])
+    app.state.auth = auth
+    allowed_origins = [s.strip() for s in settings.cors_origins.split(",") if s.strip()]
+
+    @app.middleware("http")
+    async def protect_cookie_requests(request, call_next):
+        origin = request.headers.get("origin")
+        if request.method in ("POST", "PUT", "DELETE", "PATCH") and origin:
+            if origin not in allowed_origins and origin != str(request.base_url).rstrip("/"):
+                return JSONResponse(status_code=403, content={"detail": "허용되지 않은 요청 출처입니다. 접속 주소(프로토콜·호스트·포트)를 서버 CORS_ORIGINS에 등록해 주세요.", "code": "origin_not_allowed"})
+        response = await call_next(request)
+        if request.url.path.startswith("/api/v1/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    app.add_middleware(CORSMiddleware, allow_origins=allowed_origins, allow_credentials=True, allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type"])
     api = APIRouter(prefix="/api/v1")
+    api.include_router(auth_router(auth))
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        # FastAPI's default error response echoes input, including invalid passwords.
+        errors = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": errors})
 
     def rate_limit(key, maximum=20, seconds=60):
         current = time.monotonic()
@@ -47,28 +74,12 @@ def create_app(settings=None, store=None, tools=None, planner=None, sender=None)
     async def tool_error(request, exc):
         return JSONResponse(status_code=502, content={"detail": str(exc), "code": exc.code})
 
-    async def owner(authorization: str = Header(default="")):
-        if not authorization.startswith("Bearer "):
-            raise HTTPException(401, "데모 세션을 먼저 생성해 주세요.")
-        token = authorization[7:]
-        if not 40 <= len(token) <= 100:
-            raise HTTPException(401, "유효하지 않은 데모 세션입니다.")
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        if not await store.get(digest, "identity", "self"):
-            raise HTTPException(401, "세션이 만료되었거나 유효하지 않습니다.")
-        return digest
+    async def owner(user=Depends(auth.current)):
+        return "user:" + user["id"]
 
     @api.get("/health")
     async def health():
-        return {"status": "ok", "mode": settings.app_mode, "storage": settings.storage_backend, "model": settings.openai_model, "discord_configured": bool(settings.discord_bot_token and settings.discord_allowed_user_ids), "browser_push": False, "sms": False, "scheduled_search": False}
-
-    @api.post("/sessions", status_code=201)
-    async def create_session(request: Request):
-        rate_limit("session:" + (request.client.host if request.client else "unknown"), 10)
-        token = secrets.token_urlsafe(32)
-        digest = hashlib.sha256(token.encode()).hexdigest()
-        await store.put(digest, "identity", "self", {"created_at": now()}, create_only=True)
-        return {"token": token}
+        return {"status": "ok", "mode": settings.app_mode, "animal_data_source": settings.animal_data_source, "storage": settings.storage_backend, "model": settings.openai_model, "discord_configured": settings.app_mode == "live" and bool(settings.discord_bot_token and settings.discord_allowed_user_ids), "browser_push": False, "sms": False, "scheduled_search": False}
 
     @api.get("/regions")
     async def regions():
@@ -95,6 +106,7 @@ def create_app(settings=None, store=None, tools=None, planner=None, sender=None)
                 result = {**state, "status": "failed", "errors": [{"code": "budget", "message": "전체 실행 시간 한도에 도달했습니다."}], "candidates": [], "elapsed_ms": settings.request_timeout_seconds * 1000}
             result.pop("started", None)
             result["mode"] = settings.app_mode
+            result["animal_data_source"] = settings.animal_data_source
             result["profile_id"] = body.profile_id
             result["created_at"] = now()
             # Persist only validated conditions; invalid dates/region aren't committed to memory.

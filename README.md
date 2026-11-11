@@ -6,6 +6,8 @@
 
 Python 3.12 이상, uv, Node.js 18.17 이상(Vite 6 호환), npm이 필요합니다. 신규 환경은 지원되는 Node LTS를 권장합니다.
 
+로그인에는 Redis 7 이상 또는 호환되는 Valkey가 필요합니다. 로컬 Docker를 사용하는 경우 Docker Desktop 실행 후 저장소 루트에서 `docker compose up -d redis`로 시작합니다. 이 프로젝트 전용 Redis는 호스트의 `127.0.0.1:6380`을 사용하므로 `.env`에는 `REDIS_URL=redis://127.0.0.1:6380/0`을 설정합니다. 이미 별도 Redis를 사용 중이면 해당 주소를 지정하세요. Redis 연결이 없으면 로그인은 503으로 실패하며 익명 인증으로 우회하지 않습니다. 상태 확인은 `docker compose ps`, 연결 확인은 `docker compose exec redis redis-cli ping`으로 합니다.
+
 프로젝트 루트에서:
 
 ```powershell
@@ -25,15 +27,15 @@ npm run dev
 - 화면: http://localhost:5173
 - API 문서: http://127.0.0.1:8000/docs
 - 상태: http://127.0.0.1:8000/api/v1/health
-- `.env` 없이 실행해도 기본값은 샘플 모드입니다. `.env`와 `.data`, `.tools`, 가상환경은 Git에서 제외합니다.
+- 동물 API 키 없이 실행하면 기본값은 샘플 데이터입니다. `.env`와 `.data`, `.tools`, 가상환경은 Git에서 제외합니다.
 
 ## 두 가지 실행 모드
 
-| 설정 | 로컬·공개 샘플 체험 | 실제 연동 |
+| 설정 | 로컬 실행 | 전체 실제 연동 |
 | --- | --- | --- |
 | `APP_MODE` | `local` | `live` |
 | `STORAGE_BACKEND` | `sqlite` | `supabase` |
-| 동물 데이터 | 명시적으로 생성한 가상 샘플 | 국가동물보호정보시스템 실제 응답 |
+| 동물 데이터 | 키가 없으면 가상 샘플, 키가 있으면 실제 API | 국가동물보호정보시스템 실제 응답 |
 | 계획 | 규칙 기반, LLM 미호출 | OpenAI Responses API, `gpt-6-luna` |
 | 저장 | 로컬 `.data/meet-again.db` | 지정 Supabase 스키마 |
 | Discord | 발송하지 않음 | 동의·허용 목록·신청 조건 확인 후 발송 |
@@ -50,17 +52,34 @@ npm run dev
 6. 필수 조건을 비워 검색하면 추가 입력을 요청합니다. 조건을 채워 재실행하면 같은 대화에 병합됩니다.
 7. 명시적으로 확인한 특징은 `입력 특징을 확인하고 기억`으로 저장합니다. 다른 검색에서 `저장한 특징 사용`을 켜면 현재 입력이 우선합니다.
 
-로그인은 없습니다. 브라우저에 저장한 무작위 데모 토큰을 서버에서 해시로 검증합니다. 다른 브라우저·기기에는 기록이 이어지지 않으며 브라우저 데이터 삭제 시 접근을 잃습니다. 기본 프로필 외 다중 동물 프로필은 API의 `profile_id`로 분리하며 UI 프로필 선택은 후속 범위입니다.
+루트 화면 오른쪽 위의 **로그인** 버튼으로 `/login`에 이동합니다. 회원가입·로그인 후 검색·저장·이력·알림을 계정별로 사용하며 같은 계정으로 다른 브라우저에서도 기록을 조회할 수 있습니다. 비밀번호는 Argon2로 해시해 기존 DB의 `identity/account` 문서에 보관하고, 로그인 세션과 인증 호출 제한은 Redis에 저장합니다. 토큰은 HttpOnly 쿠키로 전달하며 localStorage에 저장하지 않습니다. 기본 프로필 외 다중 동물 프로필은 API의 `profile_id`로 분리합니다.
+
+### Redis 로그인과 배포
+
+- API: `POST /api/v1/auth/register`(email/password/name), `POST /api/v1/auth/login`(email/password), `GET /api/v1/auth/me`, `POST /api/v1/auth/logout`. 비밀번호는 10~128자입니다. 기존 익명 `POST /sessions`와 Bearer 데모 토큰은 사용할 수 없습니다.
+- Swagger에서는 먼저 `/auth/login` 또는 `/auth/register`를 실행하면 브라우저가 쿠키를 보관하므로 이후 검색에 수동 토큰 입력이 필요 없습니다.
+- 서버 환경변수: `REDIS_URL`, `AUTH_SESSION_TTL_SECONDS=86400`, `AUTH_COOKIE_SAMESITE=lax`. Render 운영에는 `AUTH_COOKIE_SECURE=true`를 설정하세요. `APP_MODE=live`로 HTTP 로컬 개발 시에는 로컬 `.env`에서만 `AUTH_COOKIE_SECURE=false`로 지정합니다.
+- Vercel의 `VITE_API_BASE_URL`은 **`/api/v1`** 로 설정하고 다시 빌드하세요. `frontend/vercel.json`이 Render API를 같은 도메인으로 프록시하고 `/login`의 새로고침도 지원합니다. 이전의 Render 절대 API 주소 설정을 이 값으로 변경해야 합니다.
+- Render `CORS_ORIGINS`에는 `https://vibe-codeing-demo.vercel.app`을 유지합니다. 변경 요청의 Origin도 검사하며 API 응답은 `Cache-Control: no-store`로 전달합니다.
+- Render Key Value를 사용하는 경우 백엔드와 같은 작업 공간·리전에 로그인용 인스턴스를 준비하고 Internal URL을 `REDIS_URL`로 설정합니다. 현재 다른 프로젝트의 Key Value는 재사용하거나 변경하지 않았습니다. 이번 구현은 원격 Redis 생성이나 서비스 재배포를 포함하지 않습니다.
+- 계정은 기존 SQLite/Supabase `documents`의 허용된 `identity` 종류를 재사용하므로 새 테이블이나 공개 RLS 정책은 필요 없습니다. 세션은 Redis에서 만료(기본 24시간)·로그아웃 시 폐기되고, Redis 데이터가 사라지면 다시 로그인해야 합니다.
+- 이전 익명 세션의 기록은 로그인 계정으로 자동 이관하지 않습니다. 이메일 인증·비밀번호 재설정·계정 삭제·다중 기기 전체 로그아웃은 이번 구현 범위에 포함되지 않습니다.
+
+회원가입에서 `403 / origin_not_allowed`가 발생하면 접속한 프론트엔드 주소(프로토콜·호스트·포트)가 서버 `CORS_ORIGINS`에 포함되어 있는지 확인하세요. `localhost`와 `127.0.0.1`은 서로 다른 origin입니다. 기본 로컬 설정은 `http://localhost:5173,http://127.0.0.1:5173`이며, 포트가 달라졌다면 실제 포트를 명시적으로 추가해야 합니다. `.env` 변경 후 백엔드를 재시작하세요. HTTP 로컬 개발용 `AUTH_COOKIE_SECURE=false`는 Render 운영 설정에 복사하지 않습니다.
 
 ## 실제 API 연결
 
 `.env.example`을 참고해 서버에 설정합니다. 비밀 키를 채팅·Git·프론트엔드 변수에 넣지 마세요.
 
+루트 페이지(`/`)에서 실제 공고만 검색하려면 `APP_MODE=local`, `STORAGE_BACKEND=sqlite`를 유지하고 `.env`에 `ANIMAL_API_KEY` 또는 `ANIMAL_API_SERVICE_KEY`를 설정한 뒤 백엔드를 재시작하세요. 두 이름을 모두 설정하면 `ANIMAL_API_KEY`를 우선합니다. 키가 있으면 지역 목록과 검색 결과를 실제 API에서 가져옵니다. 이 조합에서는 OpenAI·Supabase 없이 기존 규칙 기반 계획과 로컬 저장을 사용하며 알림은 발송하지 않습니다. API 장애·인증 실패 시 샘플로 대체하지 않고 오류를 표시합니다.
+
+상태 API의 `animal_data_source`(`api`/`sample`)와 화면 상단 배지에서 데이터 출처를 확인합니다. `mode`는 계획·알림 실행 모드를 뜻하므로 `local`이어도 실제 공고를 조회할 수 있습니다. 기존 `http://apis.data.go.kr/` 기본 주소 설정은 HTTPS로 보정합니다.
+
 | 환경변수 | 용도 |
 | --- | --- |
 | `OPENAI_API_KEY` | 모델 API 키. ChatGPT 구독과 별도 |
 | `OPENAI_MODEL` | `gpt-6-luna` 유지, 해당 계정의 모델 사용 권한 확인 |
-| `ANIMAL_API_KEY` | 공공데이터포털 서비스 활용 승인 후 받은 키, 일반/URL 인코딩 키 모두 처리 |
+| `ANIMAL_API_KEY` / `ANIMAL_API_SERVICE_KEY` | 공공데이터포털 서비스 활용 승인 후 받은 키, 일반/URL 인코딩 키 모두 처리. local에서도 설정 시 실제 조회 |
 | `ANIMAL_API_BASE_URL` | 공식 v2 서비스 기본 주소 |
 | `SUPABASE_URL` | `https://yaywavgjaquftvekuvsb.supabase.co` |
 | `SUPABASE_SCHEMA` | `aio-03-p2-team1-demo` |
@@ -74,12 +93,12 @@ Supabase 연결 도구의 권한 오류로 기존 원격 테이블은 확인하�
 
 Data API의 Exposed schemas에 `aio-03-p2-team1-demo`를 추가해야 합니다. 이 테이블은 RLS를 활성화하고 `anon`·`authenticated` 접근을 허용하지 않습니다. 서버 전용 키로 접근하며 FastAPI가 모든 요청에 데모 소유권 조건을 적용합니다. 기존 같은 이름 테이블이 있으면 자동 덮어쓰기를 기대하지 말고 호환성을 검토하세요.
 
-`APP_MODE=live`, `STORAGE_BACKEND=supabase` 설정 후 서버를 다시 시작합니다. 키·스키마가 없으면 명시적으로 실패합니다. 실제 API·DB·모델·지도·Discord는 키가 없는 현재 환경에서 검증하지 않았습니다.
+OpenAI·Supabase·알림까지 연동하려면 `APP_MODE=live`, `STORAGE_BACKEND=supabase` 설정 후 서버를 다시 시작합니다. 키·스키마가 없으면 명시적으로 실패합니다. 2026-11-10 실제 동물 API 검색을 검증했습니다. 최초 HTTP 403/사유 코드 30은 키 값 뒤에 잘못 붙은 `_Decoding` 문자열이 원인이었고, 이를 제거한 후 서울·강아지·최근 14일 조건으로 71건/2페이지를 조회해 상위 10건을 반환했습니다. `Encoding`/`Decoding` 설명을 키 값에 덧붙이지 마세요. DB·모델·지도·Discord의 실제 연동은 이번 작업에서 검증하지 않았습니다.
 
 ## 알림
 
 - 주기 검색, Cron, 외부 공고 자동 감시는 없습니다.
-- 사용자가 명시적으로 실행한 실제 검색 결과를 **같은 브라우저 소유자의** 저장 검색·활성 신청과 대조합니다.
+- 사용자가 명시적으로 실행한 실제 검색 결과를 **같은 로그인 계정의** 저장 검색·활성 신청과 대조합니다.
 - 저장 조건의 지역·종류·기간에 맞고, 추가 특징이 있다면 최소 한 단서가 맞는 후보를 Discord DM으로 보냅니다.
 - 신청 시 저장한 기간을 그대로 사용합니다. 향후 날짜를 자동으로 늘리지 않습니다.
 - 샘플 데이터는 절대로 발송하지 않습니다. 신청 확인 DM도 자동 발송하지 않습니다.

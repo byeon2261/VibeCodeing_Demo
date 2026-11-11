@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { PawPrint, Search, Bookmark, Bell, Activity, ArrowRight, MapPin, Phone, X, Check, ChevronRight, RefreshCw, SlidersHorizontal, ShieldCheck, ExternalLink, Heart, LoaderCircle } from 'lucide-react';
-import { api, post } from './api';
+import { PawPrint, Search, Bookmark, Bell, Activity, ArrowRight, MapPin, Phone, X, Check, ChevronRight, RefreshCw, SlidersHorizontal, ShieldCheck, ExternalLink, Heart, LoaderCircle, LogIn, LogOut } from 'lucide-react';
+import { api, post, currentUser } from './api';
+import AuthPage from './AuthPage';
 import './style.css';
 
 function localDate(offset = 0) {
@@ -41,7 +42,7 @@ function MapView({ candidate }) {
   return <><div ref={ref} className="map"/>{error && <p role="alert">{error}</p>}</>;
 }
 
-function App() {
+function SearchApp({ user, checkingAuth, navigate, logout }) {
   const [tab, setTab] = useState('search');
   const [form, setForm] = useState(empty);
   const [regions, setRegions] = useState([]);
@@ -64,7 +65,12 @@ function App() {
   const [includeLocation, setIncludeLocation] = useState(true);
 
   useEffect(() => {
-    Promise.all([api('/health'), api('/regions')]).then(([h, r]) => { setHealth(h); setRegions(r); }).catch(() => setError('서버에 연결하지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.'));
+    Promise.allSettled([api('/health'), api('/regions')]).then(([h, r]) => {
+      if (h.status === 'fulfilled') setHealth(h.value);
+      if (r.status === 'fulfilled') setRegions(r.value);
+      const failure = [h, r].find(item => item.status === 'rejected');
+      if (failure) setError(failure.reason.message);
+    });
   }, []);
   useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 4000); return () => clearTimeout(id); }, [toast]);
   useEffect(() => {
@@ -79,6 +85,7 @@ function App() {
     try { await fn(); } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
   async function loadTab(next) {
+    if (next !== 'search' && !user) { navigate('/login'); return; }
     setTab(next); setError('');
     try {
       if (next === 'saved' || next === 'alerts') setSaved(await api('/saved-searches'));
@@ -105,14 +112,15 @@ function App() {
       <div className="side-label">우리 가족 찾기</div>
       <nav aria-label="주 메뉴">{[['search', Search, '구조동물 검색'], ['saved', Bookmark, '저장한 검색'], ['alerts', Bell, '알림 신청'], ['history', Activity, '실행 이력']].map(([id, Icon, label]) => <button key={id} className={tab === id ? 'nav active' : 'nav'} onClick={() => loadTab(id)}><Icon size={19}/>{label}{tab === id && <ChevronRight size={16}/>}</button>)}</nav>
       <div className="side-note"><Heart size={20}/><strong>작은 단서가<br/>다시 만나는 시작이 되도록.</strong><p>확인할 수 있는 정보를 모아<br/>가족을 찾는 길을 돕습니다.</p></div>
-      <div className="side-bottom"><span className="dot"/> 로그인 없는 데모<small>이 브라우저에 연결된 검색을 보관해요.</small></div>
+      <div className="side-bottom"><span className="dot"/> {user ? `${user.name}님의 찾기 공간` : '소중한 단서를 보관하세요'}<small>{user ? '검색 기록을 내 계정에 보관해요.' : '로그인하면 검색 기록을 이어갈 수 있어요.'}</small></div>
     </aside>
 
     <main>
-      <header className="topbar"><span>다시 만나 <ChevronRight size={14}/> { {search:'구조동물 검색',saved:'저장한 검색',alerts:'알림 신청',history:'실행 이력'}[tab] }</span><span className="badge">{health ? health.mode === 'local' ? '샘플 데이터 모드' : '실제 API 모드' : '서버 확인 중'}</span></header>
+      <header className="topbar"><span>다시 만나 <ChevronRight size={14}/> { {search:'구조동물 검색',saved:'저장한 검색',alerts:'알림 신청',history:'실행 이력'}[tab] }</span><div className="topbar-actions"><span className="badge">{health ? health.animal_data_source === 'api' ? '실제 API 모드' : '샘플 데이터 모드' : '서버 확인 중'}</span>{checkingAuth ? <span className="muted" role="status">로그인 확인 중…</span> : user ? <><span className="account-name">{user.name}님</span><button className="secondary account-button" onClick={() => action(logout)} disabled={busy}><LogOut size={15}/> 로그아웃</button></> : <a className="primary account-button" href="/login" onClick={e => { e.preventDefault(); navigate('/login'); }}><LogIn size={16}/> 로그인</a>}</div></header>
       <div className="content">
         <div className="page-heading"><div className="eyebrow"><span/> 함께 찾는 소중한 가족</div><h1>{tab === 'search' ? <>다시 만날 수 있도록,<br/>작은 단서부터 찾아봐요.</> : tab === 'saved' ? '기억해 둔 검색 조건' : tab === 'alerts' ? '새로운 단서를 전해드려요.' : '검색이 걸어온 길'}</h1><p>{tab === 'search' ? '구조·보호 중인 동물 공고에서 우리 가족과 닮은 후보를 확인하세요.' : tab === 'saved' ? '저장해 둔 조건으로 다시 검색하거나 알림을 신청할 수 있어요.' : tab === 'alerts' ? '신청 후 직접 실행한 검색에서 조건에 맞는 후보를 찾으면 Discord DM으로 알려드려요.' : '도구 선택부터 검증과 수정까지, 실행 결과를 확인할 수 있어요.'}</p></div>
-        {health?.mode === 'local' && <div className="notice"><ShieldCheck size={18}/><span>지금은 <b>생성된 샘플 데이터</b>를 사용합니다. 실제 공고가 아니며 알림을 발송하지 않습니다. 공개 샘플 환경의 기록은 서버 재시작 시 초기화될 수 있습니다.</span></div>}
+        {health?.animal_data_source === 'sample' && <div className="notice"><ShieldCheck size={18}/><span>지금은 <b>생성된 샘플 데이터</b>를 사용합니다. 실제 공고가 아니며 알림을 발송하지 않습니다. 실제 공고 조회에는 서버의 ANIMAL_API_KEY 또는 ANIMAL_API_SERVICE_KEY 설정이 필요합니다.</span></div>}
+        {health?.animal_data_source === 'api' && <div className="notice"><ShieldCheck size={18}/><span><b>국가동물보호정보시스템의 실제 공고</b>를 조회합니다. 검색 결과에서 조회 시각과 범위를 확인할 수 있습니다.{health.mode === 'local' && ' 로컬 실행에서는 알림을 발송하지 않습니다.'}</span></div>}
         {error && <div className="error" role="alert">{error}<button aria-label="오류 닫기" onClick={() => setError('')}><X size={16}/></button></div>}
 
         {tab === 'search' && <>
@@ -144,5 +152,26 @@ function App() {
     {toast && <div className="toast" role="status"><Check size={18}/>{toast}</div>}
     {selected && <div className="modal-backdrop" onClick={() => setSelected(null)}><section className="modal" role="dialog" aria-modal="true" aria-label="공고 상세" onClick={e => e.stopPropagation()}><button autoFocus className="modal-close" aria-label="상세 닫기" onClick={() => setSelected(null)}><X/></button><span className="eyebrow">{selected.sample ? '가상 샘플 공고' : selected.notice_no}</span><h2>{selected.breed}</h2><p>{selected.features || '등록된 특징 없음'}</p>{selected.image_url && <img className="detail-image" src={selected.image_url} alt={selected.breed}/>}<div className="detail-grid"><div><small>발견 일자</small><b>{selected.found_date}</b></div><div><small>공고 상태</small><b>{selected.status || '정보 없음'}</b></div></div><h3>비교한 단서 · {selected.score}점</h3>{selected.matches.map((x,i) => <p className="green" key={i}>일치 · {x}</p>)}{selected.mismatches.map((x,i) => <p key={i}>불일치/부분 일치 · {x}</p>)}{selected.unknown.map((x,i) => <p className="muted" key={i}>미확인 · {x}</p>)}<p className="muted">단순 문자열·가중치 점수이며 동일 개체의 확률이 아닙니다.</p><h3>구조 위치</h3><p>{selected.found_place || '위치 정보 없음'}</p>{!selected.sample && selected.found_place && <a className="text-button" target="_blank" rel="noreferrer" href={`https://map.kakao.com/link/search/${encodeURIComponent(selected.found_place)}`}>카카오맵에서 구조 장소 검색 <ExternalLink size={14}/></a>}<h3>보호센터 · {selected.shelter_name || '미상'}</h3><MapView candidate={selected}/>{selected.shelter_phone && <a className="primary" href={`tel:${selected.shelter_phone.replace(/[^0-9+]/g, '')}`}><Phone size={16}/>{selected.shelter_phone}</a>}{!selected.sample && selected.shelter_address && <a className="secondary" href={selected.location?.map_url || `https://map.kakao.com/link/search/${encodeURIComponent(selected.shelter_address)}`} target="_blank" rel="noreferrer"><MapPin size={16}/>보호센터 위치 확인</a>}<p className="muted">조회 시각 {new Date(selected.fetched_at).toLocaleString('ko-KR')}</p><a href={selected.source_url} target="_blank" rel="noreferrer" className="text-button">공식 출처 확인 <ExternalLink size={14}/></a></section></div>}
   </div>;
+}
+function App() {
+  const authVersion = useRef(0);
+  const [path, setPath] = useState(window.location.pathname);
+  const [user, setUser] = useState(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [authError, setAuthError] = useState('');
+  function navigate(next) { window.history.pushState({}, '', next); setPath(next); window.scrollTo(0, 0); }
+  useEffect(() => {
+    const version = authVersion.current;
+    currentUser().then(next => { if (version === authVersion.current) setUser(next); }).catch(error => { if (version === authVersion.current) setAuthError(error.message); }).finally(() => setCheckingAuth(false));
+    const pop = () => setPath(window.location.pathname);
+    const required = () => { authVersion.current += 1; setUser(null); navigate('/login'); };
+    window.addEventListener('popstate', pop);
+    window.addEventListener('meet-again-auth-required', required);
+    return () => { window.removeEventListener('popstate', pop); window.removeEventListener('meet-again-auth-required', required); };
+  }, []);
+  const authenticated = next => { authVersion.current += 1; setUser(next); setAuthError(''); setCheckingAuth(false); navigate('/'); };
+  async function logout() { await post('/auth/logout', {}); authVersion.current += 1; setUser(null); setAuthError(''); navigate('/'); }
+  if (path === '/login') return <AuthPage navigate={navigate} onAuthenticated={authenticated}/>;
+  return <>{authError && <div className="auth-service-error" role="alert">{authError}</div>}<SearchApp key={user?.id || 'guest'} user={user} checkingAuth={checkingAuth} navigate={navigate} logout={logout}/></>;
 }
 createRoot(document.getElementById('root')).render(<App/>);

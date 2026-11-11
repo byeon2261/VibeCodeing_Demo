@@ -2,6 +2,8 @@
 
 당신은 우리 팀의 Python 백엔드·React 프론트엔드·LangGraph 에이전트 설계와 구현을 돕는 개발 파트너다. 아래 요구사항을 기준으로 실제 동작하는 데모 서비스를 단계적으로 구현하라. 설계 설명만 제공하지 말고, 확인된 범위의 코드 작성·실행·검증·배포 준비까지 진행하라.
 
+최신 배포 기준: Redis 쿠키 인증 도입 후 Vercel의 `VITE_API_BASE_URL`은 `/api/v1`이다. 이전 항목의 Render 절대 URL 안내는 18번 이후 설정으로 대체한다. 로컬 구현과 실제 배포 상태는 구분하며, 21번에 마지막 원격 진단 결과와 배포에 필요한 조치를 기록한다.
+
 ## 1. 프로젝트 정보와 목표
 
 - 프로젝트명: **다시 만나**
@@ -355,3 +357,354 @@ START
 - 같은 기준으로 성찰 적용 전후를 측정하고 결과를 기록한다.
 - 배포된 화면에서 핵심 흐름을 체험할 수 있다.
 - 미지원 기능·미확정 설정·외부 서비스 제약을 문서에 명시한다.
+
+## 13. 추가 기능: 루트 페이지 검색 결과의 ANIMAL_API 연동
+
+추가 요청일: 2026-11-10
+
+### 요구사항과 구현 내용
+
+- 루트 페이지(`/`)의 `구조동물 찾기`로 검색하면 백엔드 `POST /api/v1/searches`를 거쳐 국가동물보호정보시스템 ANIMAL_API의 실제 공고를 조회한다.
+- 백엔드는 `ANIMAL_API_KEY`와 기존 `.env`에서 사용 중인 `ANIMAL_API_SERVICE_KEY`를 모두 지원한다. 두 이름이 모두 있으면 `ANIMAL_API_KEY`를 우선하며, 비밀 키는 서버에서만 사용한다.
+- 동물 API 키가 설정되어 있으면 `APP_MODE=local`, `STORAGE_BACKEND=sqlite`에서도 실제 데이터를 조회한다. 실제 공고 검색만을 위해 OpenAI 호출이나 Supabase 전환을 강제하지 않는다. 키가 없고 로컬 모드인 경우에만 명시적인 샘플 데이터를 사용한다.
+- 지역 목록은 `sido_v2`, 공고 검색은 `abandonmentPublic_v2`로 연결한다. 선택 지역은 공식 코드로 매핑하고 기간은 `YYYYMMDD`, 동물 종류는 공식 축종 코드로 전달한다. 전체 종류를 선택하면 축종 필터를 생략한다.
+- 공식 기본 주소는 `https://apis.data.go.kr/1543061/abandonmentPublicService_v2`이다. 기존 `http://apis.data.go.kr/` 설정은 HTTPS로 보정하고 일반 키와 URL 인코딩 키를 지원한다.
+- 공고 응답을 기존 후보 형식으로 정규화해 사진·품종·털색·특징·발견 일자·위치·보호센터·연락처를 표시한다. 기존 조건 검증·후보 정렬·페이지 상한·상위 10건 표시를 유지한다.
+- 상태 API(`/api/v1/health`)와 검색 응답에 `animal_data_source`(`api` 또는 `sample`)를 추가한다. 루트 페이지의 배지·안내문 및 실행 이력이 실제 데이터 출처를 표시한다. `mode=local`과 샘플 사용 여부를 같은 의미로 취급하지 않는다.
+- 지역 목록 요청이 실패해도 성공한 상태 확인 결과는 유지하고 API의 오류 안내를 보여 준다. 실제 조회의 인증 오류·통신 실패를 빈 검색 결과나 샘플 데이터로 대체하지 않는다.
+- 로컬 실행에서는 실제 공고를 조회하더라도 알림을 발송하지 않으며 알림 신청 버튼의 서버 설정 상태도 이에 맞게 표시한다.
+
+### 적용과 검증
+
+- `.env`의 `ANIMAL_API_KEY` 또는 `ANIMAL_API_SERVICE_KEY`를 설정하고 백엔드를 재시작한 뒤 루트 페이지를 새로고침한다. 로컬 검색에는 `APP_MODE=local`, `STORAGE_BACKEND=sqlite`를 사용할 수 있다.
+- 변경 파일: `backend/config.py`, `backend/tools.py`, `backend/main.py`, `backend/graph.py`, `frontend/src/main.jsx`, `tests/test_api.py`, `.env.example`, `README.md`, `docs/architecture.md`.
+- `python -m pytest -q -p no:cacheprovider`: **29개 통과**. 모의 외부 응답을 사용하는 API 통합 테스트로 두 키 이름, 검색 조건 전달, 실제 후보 형식, 인증 실패 시 샘플 대체 금지를 검증했다.
+- `frontend`에서 `npm run build`: **통과**.
+- 최초 외부 조회는 HTTP 403, `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`, 사유 코드 `30`(등록되지 않은 서비스키)으로 실패했다. 후속 진단에서 `.env`의 `ANIMAL_API_SERVICE_KEY` 값 끝에 설명용 `_Decoding` 문자열이 포함되어 있음을 확인했다. 이 문자열까지 키로 전송한 것이 원인이며 활용 승인 문제로 단정할 수 없었다.
+- `.env`에서 키 뒤의 `_Decoding`만 제거한 뒤 실제 API 조회에 성공했다. 서울·최근 14일·전체 종류 검색에서 첫 페이지 50건/전체 170건을 확인했고, 서울·강아지·최근 14일 조건의 실제 검색 워크플로에서는 2페이지/전체 71건을 조회하여 상위 후보 10건을 반환했다(`status=completed`, 오류 없음). 조회 시점에 따라 건수는 달라질 수 있다.
+- `Encoding`/`Decoding`은 포털의 키 구분 설명이며 키 값에 접미사로 덧붙이지 않는다. 키 원문은 출력하거나 이 문서에 기록하지 않는다. 설정을 캐시한 실행 중 백엔드는 `.env` 변경 후 재시작한다.
+
+## 14. 프론트엔드 Vercel 배포 설정
+
+사용자 확정 사항: 프론트엔드는 `https://vibe-codeing-demo.vercel.app/`에 배포한다. 앞 절의 Render Static Site 추천보다 이 선택을 우선한다. 백엔드는 기존 `https://meet-again-ghbye-api.onrender.com`의 FastAPI 서비스를 계속 사용한다.
+
+### Vercel 프로젝트 설정
+
+저장소 루트에서 프로젝트를 가져온 경우 아래 설정을 사용한다.
+
+| 항목 | 값 |
+| --- | --- |
+| Framework Preset | `Vite` |
+| Root Directory | `frontend` |
+| Install Command | `npm ci` |
+| Build Command | `npm run build` |
+| Output Directory | `dist` |
+
+명령과 출력 경로는 `frontend`를 기준으로 한다. Root Directory를 `frontend`로 지정했다면 출력 경로를 `frontend/dist`로 중복 지정하지 않는다. 배포 브랜치에는 최신 프론트엔드 변경 사항이 포함되어야 한다.
+
+### 프론트엔드 환경변수
+
+Vercel 프로젝트의 Settings → Environment Variables에서 설정한다.
+
+```dotenv
+VITE_API_BASE_URL=https://meet-again-ghbye-api.onrender.com/api/v1
+```
+
+- 위 값은 사용자가 확정한 기존 Render 백엔드의 API 주소이다. 끝에 `/api/v1`을 한 번만 포함한다. `localhost`나 `127.0.0.1`을 배포용 값으로 사용하지 않는다.
+- Production 환경에 설정한다. Preview 배포에서도 검색을 사용하려면 Preview에도 설정한다.
+- 현재 코드의 기본값 `/api/v1`은 같은 도메인으로 요청한다. 로컬 `vite.config.js`의 `server.proxy`는 개발 서버 전용이므로 Vercel 정적 배포에서 백엔드 프록시를 제공하지 않는다. 현재 구성은 공개 백엔드 절대 주소를 사용한다.
+- 환경변수를 변경한 뒤 반드시 새 빌드로 Redeploy한다. Vite의 `VITE_` 값은 빌드 시 번들에 반영되므로 기존 배포에는 자동 적용되지 않는다.
+- `ANIMAL_API_KEY`, `ANIMAL_API_SERVICE_KEY`, `OPENAI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DISCORD_BOT_TOKEN`은 백엔드 서버에만 설정한다. 이 값에 `VITE_` 접두어를 붙이거나 루트 `.env` 전체를 프론트엔드 환경변수로 옮기지 않는다.
+
+### 백엔드 연결 설정
+
+백엔드 호스팅 서비스의 환경변수에 확정된 Vercel origin을 등록한다. 기존에 필요한 origin은 유지하면서 아래 Vercel 주소를 추가한다.
+
+```dotenv
+CORS_ORIGINS=http://localhost:5173,https://vibe-codeing-demo.vercel.app
+ANIMAL_API_BASE_URL=https://apis.data.go.kr/1543061/abandonmentPublicService_v2
+```
+
+- `CORS_ORIGINS`에는 프로토콜과 호스트만 넣는다. 경로(`/api/v1` 등)와 마지막 `/`는 넣지 않는다. 커스텀 도메인이 있으면 쉼표로 추가한다.
+- 현재 CORS 구현은 정확한 origin 목록을 사용한다. Preview 주소는 Production 주소와 다르므로 필요한 Preview origin도 별도로 추가한다. `https://*.vercel.app` 같은 패턴은 현재 코드에서 지원하지 않는다.
+- 백엔드에 실제 동물 API 키를 `ANIMAL_API_KEY` 또는 `ANIMAL_API_SERVICE_KEY` 중 하나로 설정한다. `_Decoding`/`_Encoding` 설명 문자열을 키에 덧붙이지 않는다.
+- 로컬 `.env`는 Git에서 제외되어 있다. 로컬 키 수정은 배포 서버에 자동 반영되지 않으므로 호스팅 서비스의 환경변수도 수정해야 한다.
+- 로컬에서 수정한 최신 백엔드 코드도 배포한다. 이전 배포가 `APP_MODE=local`에서 무조건 샘플을 반환하는 버전이면 환경변수만 설정해도 새 동작이 적용되지 않는다.
+- 실제 공고 조회만 필요하면 최신 코드에서 `APP_MODE=local`, `STORAGE_BACKEND=sqlite`와 동물 API 키 조합을 사용할 수 있다. OpenAI·Supabase·알림까지 사용하는 기존 `APP_MODE=live`의 필수 조건은 유지한다. 배포 서버에서 SQLite를 쓰는 경우 저장 검색·실행 이력은 호스팅 저장소의 영속성에 따르며, Vercel 프론트엔드 배포만으로 영속성이 보장되지 않는다.
+- 환경변수 변경 후 백엔드를 재시작하거나 재배포한다.
+
+### 지도와 라우팅
+
+- 지도를 표시할 경우 Vercel에 `VITE_KAKAO_JS_KEY`를 추가하고 카카오 앱의 웹 도메인 설정에 실제 Vercel/커스텀 도메인을 등록한다. 보호센터 주소를 좌표로 변환하는 `KAKAO_REST_API_KEY`는 백엔드에 설정한다. 지도 키가 없어도 공고 검색과 주소 표시는 가능하다.
+- 현재 화면은 `/`에서 상태로 탭을 전환하므로 SPA fallback용 `vercel.json`은 필수가 아니다. 향후 `/saved`, `/history` 같은 클라이언트 경로를 추가하면 새로고침을 위한 SPA rewrite를 설정한다.
+
+### 배포 후 확인과 남은 정보
+
+1. 백엔드 `/api/v1/health`에서 `animal_data_source=api`를 확인한다. 해당 필드가 없으면 배포 코드 버전도 확인한다. `mode=local`이어도 실제 데이터 조회는 가능하다.
+2. Vercel 화면의 브라우저 Network에서 `/health`, `/regions` 요청이 지정한 백엔드 HTTPS 주소로 전송되고 JSON을 반환하는지 확인한다.
+3. 검색 시 세션 생성(`/sessions`)과 `/searches`가 정상 처리되고 실제 후보·조회 시각·범위가 표시되는지 확인한다. GET뿐 아니라 Authorization·Content-Type 헤더가 포함되는 요청의 CORS 사전 요청도 확인한다.
+4. 환경변수 누락으로 Vercel 자체 `/api/v1/...`에 요청하거나 HTML/404가 반환되면 `VITE_API_BASE_URL`과 재배포 여부를 확인한다. CORS 오류면 백엔드 허용 origin을 확인한다.
+5. Production URL은 `https://vibe-codeing-demo.vercel.app/`, 백엔드 URL은 `https://meet-again-ghbye-api.onrender.com`으로 사용자 확인을 받았다. 추가 커스텀/Preview URL과 프론트엔드·백엔드 배포 브랜치/커밋은 확인 후 배포 기록에 남긴다. Vercel/Render 대시보드 설정을 변경했다는 의미는 아니다.
+
+### 확정 주소의 실제 점검 결과와 필요한 조치 (2026-11-10)
+
+- Vercel 루트 페이지는 HTTP 200이다. 공개 JS `/assets/index-CErlEpbP.js`에서 API 기본 주소가 상대 경로 `/api/v1`로 빌드된 것을 확인했다. 따라서 현재 배포는 Vercel 도메인으로 API를 요청하며, 실제 `https://vibe-codeing-demo.vercel.app/api/v1/health`는 HTTP 404를 반환했다.
+- Vercel의 Production 환경변수에 `VITE_API_BASE_URL=https://meet-again-ghbye-api.onrender.com/api/v1`을 설정하고 최신 프론트엔드 코드로 다시 빌드·배포한다. 현재 공개 JS에는 최신 `animal_data_source` UI도 포함되어 있지 않다.
+- Render 백엔드 `/api/v1/health`는 재확인에서 HTTP 200을 반환했다. 응답은 `mode=local`, `storage=sqlite`이며 최신 코드에 추가한 `animal_data_source` 필드는 없었다. 최신 백엔드 수정이 배포되지 않은 상태로 판단되므로 최신 코드를 배포하고, 서버 환경변수에 수정된 동물 API 키를 설정한다. 키 값은 이 문서에 기록하지 않는다.
+- `Origin: https://vibe-codeing-demo.vercel.app`으로 백엔드를 호출했을 때 `Access-Control-Allow-Origin` 헤더가 없었다. `/api/v1/searches`에 대한 POST 사전 요청은 HTTP 400과 `Disallowed CORS origin`을 반환했다. Render의 기존 `CORS_ORIGINS` 목록에 `https://vibe-codeing-demo.vercel.app`을 추가하고 변경한 설정이 반영되는 새 배포를 실행한다. 기존에 필요한 origin은 유지한다.
+- 최종 순서: 백엔드에 최신 코드·동물 API 키·CORS 설정 반영 → 백엔드 health의 `animal_data_source=api` 및 Vercel origin의 사전 요청 성공 확인 → Vercel에 API 주소 설정 후 최신 프론트엔드 Redeploy → 배포 화면에서 검색 확인.
+- 위 점검은 공개 페이지·JS·GET·OPTIONS 응답에 대한 읽기 전용 검사다. Vercel/Render 환경변수 변경이나 실제 재배포, 배포 화면에서의 검색 완료는 아직 수행하지 않았다.
+
+공식 참고: [Vercel 빌드 설정](https://vercel.com/docs/builds/configure-a-build), [Vercel 환경변수와 재배포](https://vercel.com/docs/environment-variables), [Vite 환경변수](https://vite.dev/guide/env-and-mode), [Vite 개발 서버 옵션](https://vite.dev/config/server-options.html), [FastAPI CORS](https://fastapi.tiangolo.com/tutorial/cors/), [카카오맵](https://developers.kakao.com/docs/ko/kakaomap/common).
+
+## 15. Render 백엔드 환경변수 전체 목록
+
+대상 서비스는 `meet-again-ghbye-api`이다. Render Dashboard → 해당 서비스 → Environment에서 설정한다. 아래 기본 구성은 실제 동물 공고 조회와 규칙 기반 계획을 사용한다. `ANIMAL_API_KEY`의 예시 문구는 실제 키로 교체하며 키 원문은 문서에 저장하지 않는다.
+
+```dotenv
+APP_MODE=local
+STORAGE_BACKEND=sqlite
+SQLITE_PATH=.data/meet-again.db
+ANIMAL_API_KEY=발급받은_실제_키로_교체
+ANIMAL_API_BASE_URL=https://apis.data.go.kr/1543061/abandonmentPublicService_v2
+CORS_ORIGINS=http://localhost:5173,https://vibe-codeing-demo.vercel.app,https://meet-again-ghbye-demo.onrender.com
+MAX_SEARCH_PAGES=3
+MAX_REFLECTIONS=2
+MAX_TOOL_CALLS=30
+REQUEST_TIMEOUT_SECONDS=60
+```
+
+- `APP_MODE=local`이어도 최신 코드에서 동물 API 키가 있으면 실제 공고를 조회한다. 이 구성에서는 OpenAI를 호출하거나 Discord 알림을 발송하지 않는다.
+- `ANIMAL_API_SERVICE_KEY`는 `ANIMAL_API_KEY` 대신 사용할 수 있는 별칭이다. 하나만 설정하며, 둘 다 설정하면 `ANIMAL_API_KEY`가 우선한다. `_Decoding`/`_Encoding` 설명 문자열은 붙이지 않는다.
+- `CORS_ORIGINS` 예시는 로컬 개발·현재 Vercel·기존 Render 화면을 허용한다. 실제로 계속 사용할 기존 origin은 유지하고 필요한 Preview/커스텀 도메인을 추가한다.
+- `SQLITE_PATH`는 서버 파일 경로이며 일반 배포 파일시스템의 영속성을 보장하지 않는다. 저장 기록을 계속 유지해야 한다면 별도로 준비된 Supabase 저장소를 사용한다.
+- 숫자 설정의 허용 범위: `MAX_SEARCH_PAGES` 1~10, `MAX_REFLECTIONS` 0~3, `MAX_TOOL_CALLS` 10~60, `REQUEST_TIMEOUT_SECONDS` 10~120초. 위 값은 코드의 기본값이므로 동일하게 사용할 경우 생략할 수 있다.
+
+나머지 애플리케이션 환경변수는 다음과 같다. 사용하지 않는 기능의 키는 등록하지 않아도 된다.
+
+| 이름 | 값 또는 설정 방법 | 필요한 경우 |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | 본인의 OpenAI API 키 | `APP_MODE=live` 필수 |
+| `OPENAI_MODEL` | `gpt-6-luna` | OpenAI 계획 생성. 해당 모델의 실제 계정 접근 권한 별도 확인 |
+| `SUPABASE_URL` | `https://yaywavgjaquftvekuvsb.supabase.co` | `STORAGE_BACKEND=supabase` |
+| `SUPABASE_SCHEMA` | `aio-03-p2-team1-demo` | `STORAGE_BACKEND=supabase` |
+| `SUPABASE_SERVICE_ROLE_KEY` | 해당 Supabase 프로젝트의 서버 전용 service role 키 | `STORAGE_BACKEND=supabase` 필수 |
+| `KAKAO_REST_API_KEY` | 카카오 REST API 키 | 보호센터 주소의 좌표 변환 |
+| `DISCORD_BOT_TOKEN` | Discord Bot 토큰 | Discord DM 알림 |
+| `DISCORD_ALLOWED_USER_IDS` | 동의받은 수신자 ID, 여러 명은 쉼표 구분 | Discord DM 알림 |
+
+전체 실제 연동을 사용하려면 기본 구성에서 `APP_MODE=live`, `STORAGE_BACKEND=supabase`로 변경하고 OpenAI·Supabase 필수 키를 설정한다. 지정 스키마의 `documents` 테이블과 Data API 접근 설정도 준비되어 있어야 한다. `STORAGE_BACKEND=supabase`는 `APP_MODE=local`과도 조합할 수 있으며, 이 경우 OpenAI 키는 필수가 아니다. Discord 알림에는 전체 실제 연동 구성 외에 Bot 토큰·허용 목록·사용자의 알림 신청과 동의가 필요하다.
+
+`animal_data_source`는 코드가 계산해 반환하는 응답 필드이므로 Render 환경변수로 등록하지 않는다. `VITE_API_BASE_URL`과 `VITE_KAKAO_JS_KEY`는 Vercel 프론트엔드 설정이다. `PORT`는 Render 기본값을 사용하고 시작 명령에서 `$PORT`를 읽는다.
+
+환경변수를 저장만 해 두면 실행 중인 서비스에는 적용되지 않는다. 최신 코드 배포와 함께 설정을 반영하고 `/api/v1/health` 및 실제 검색을 확인한다. Render의 `Save, rebuild, and deploy`는 새 빌드·배포, `Save and deploy`는 기존 빌드에 새 설정으로 배포, `Save only`는 다음 배포까지 적용을 보류한다. 새 코드가 Git 배포 브랜치에 반영되어 있는지도 별도로 확인한다.
+
+참고: [Render 환경변수 설정](https://render.com/docs/configure-environment-variables), [Render 기본 환경변수](https://render.com/docs/environment-variables).
+
+## 16. OpenAI·Supabase 전체 연동으로 전환
+
+사용자 요청에 따라 로컬 `.env`의 `APP_MODE=live`, `STORAGE_BACKEND=supabase`를 변경했다. 샘플 체험용 코드 기본값과 `.env.example`의 기본 모드는 유지한다. 사용자가 선택한 Render 작업 공간은 `G.H. Byeon's Workspace`(`tea-cspstp8gph6c73es77r0`)이며 변경 대상은 `meet-again-ghbye-api`(`srv-dbnk8hqjnfac73ckg0mg`)이다.
+
+### Render와 로컬에 필요한 값
+
+```dotenv
+APP_MODE=live
+STORAGE_BACKEND=supabase
+SUPABASE_URL=https://yaywavgjaquftvekuvsb.supabase.co
+SUPABASE_SCHEMA=aio-03-p2-team1-demo
+OPENAI_MODEL=gpt-6-luna
+```
+
+`OPENAI_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, 동물 API 키(`ANIMAL_API_KEY` 또는 `ANIMAL_API_SERVICE_KEY`)도 서버에 설정한다. 비밀 키 원문은 이 문서에 기록하지 않는다. 기존 `CORS_ORIGINS`에는 `https://vibe-codeing-demo.vercel.app`을 포함한다. `live` 전환 시 동의·신청·수신자 허용 조건을 갖춘 Discord 알림도 기존 코드에 따라 활성화될 수 있다.
+
+로컬 연결 검사 결과:
+
+- Pydantic 설정 검증은 통과했고 두 모드 값과 `animal_data_source=api`를 확인했다.
+- 현재 로컬 `OPENAI_API_KEY`로 계획 생성 요청을 보냈을 때 **HTTP 401 / `invalid_api_key`** 가 반환됐다. 유효한 OpenAI 프로젝트 API 키를 로컬 `.env`와 Render에 각각 설정해야 한다. 모델은 자동 변경하지 않았다. Render에 별도로 설정된 키의 유효성까지 검사한 결과는 아니다.
+- Supabase Data API에서 `Accept-Profile: aio-03-p2-team1-demo`로 `documents`를 읽으려 했을 때 **HTTP 406 / `PGRST106` / `Invalid schema`** 가 반환됐다. 현재 API에서 이 스키마로 접근할 수 없다는 의미이며, 아래 Exposed schemas 설정과 스키마 존재 여부를 확인한다.
+- Supabase 관리 연결 도구는 권한 오류로 테이블 목록을 반환하지 않았다. 원격 테이블 존재·구조를 확인하지 못했으므로 원격 DDL은 실행하지 않았다.
+
+Render 변경과 배포 검증 결과:
+
+- 사용자가 작업 공간을 선택한 뒤 `meet-again-ghbye-api`의 `APP_MODE=live`, `STORAGE_BACKEND=supabase`를 병합 방식으로 저장했다. 다른 환경변수는 교체하지 않았다.
+- Render 도구는 환경변수 수정과 함께 자동으로 새 배포 `dep-dbpelc6gekts739ocu8g`를 시작했다. 연결 브랜치는 `codex/meet-again-demo`, 배포 커밋은 `4b7bfaaddb70521c4d3937749d9908890a830254`이다. 로컬 미커밋 수정 사항을 푸시한 것은 아니다.
+- 배포의 최종 상태는 **`update_failed`** 이다. 시작 로그의 직접 원인은 `실제 연동 모드 설정 누락: openai_api_key, animal_api_key`이며, Render에 `OPENAI_API_KEY`와 `ANIMAL_API_KEY`가 필요하다. 구버전 배포에서는 동물 키 별칭 지원도 기대하지 말고 `ANIMAL_API_KEY`를 사용한다.
+- 실패 후 공개 health는 HTTP 200, `mode=local`, `storage=sqlite`, `animal_data_source` 없음으로 응답했다. 설정값 저장은 완료했으나 실행 중인 서비스의 live 전환은 완료되지 않았다.
+- 후속 작업은 유효한 OpenAI 키·동물 API 키·Supabase 서버 키를 Render에 설정하고, Supabase 테이블/스키마 접근을 준비한 뒤 최신 코드를 배포하는 것이다. 로컬의 OpenAI 키는 검증에 실패했으므로 그대로 서버에 복사하지 않는다. Supabase 키의 Render 등록 상태는 이번 시작 실패 로그만으로 확정하지 않았다.
+- 사용자 재실행 후 배포 `dep-dbpesj88v5cc73e2j4ag`도 동일한 커밋 `4b7bfaaddb70521c4d3937749d9908890a830254`에서 `update_failed`로 끝났다. `openai_api_key, animal_api_key` 누락 메시지는 외부 API가 키를 거절한 단계가 아니라 서버 설정 검사에서 두 값이 비어 있다는 뜻이다. 로컬 `.env`의 값은 Render로 자동 전달되지 않는다. `meet-again-ghbye-api`의 Environment에 `OPENAI_API_KEY`, `ANIMAL_API_KEY`라는 정확한 이름과 비어 있지 않은 실제 값을 등록한다. 현재 구버전에는 `ANIMAL_API_SERVICE_KEY` 별칭 지원이 없으므로 `ANIMAL_API_KEY`를 사용한다. 저장 후 새 환경변수가 반영되는 배포를 수행한다.
+
+### Supabase 테이블과 스키마 설정 절차
+
+1. 프로젝트 `yaywavgjaquftvekuvsb`의 SQL Editor에서 기존 스키마와 `documents` 테이블이 있는지 확인한다. Table Editor의 스키마 선택으로도 확인할 수 있다. 같은 이름의 테이블이 이미 있다면 아래 구조와 호환되는지 먼저 확인한다.
+2. 테이블이 없다면 저장소의 `scripts/bootstrap_schema.sql` 내용을 SQL Editor에서 검토·실행한다. 이 파일은 `"aio-03-p2-team1-demo".documents` 생성, 복합 기본키·인덱스, RLS 활성화, 서버 역할 권한을 설정한다. 정식 마이그레이션 이력 파일은 아니며 기존 테이블 구조를 자동 변경하지 않는다.
+3. [Data API 설정](https://supabase.com/dashboard/project/yaywavgjaquftvekuvsb/integrations/data_api/settings)에서 Data API를 활성화하고 **Exposed schemas**에 `aio-03-p2-team1-demo`를 추가한 뒤 저장한다. 기존에 사용하는 노출 스키마는 유지한다. SQL의 스키마명에는 하이픈 때문에 큰따옴표가 필요하지만 대시보드 입력에는 이름만 넣는다.
+4. [API Keys](https://supabase.com/dashboard/project/yaywavgjaquftvekuvsb/settings/api)에서 현재 Python 어댑터와 호환되는 legacy `service_role` JWT를 확인해 Render의 `SUPABASE_SERVICE_ROLE_KEY`에 설정한다. 현재 어댑터는 이 값을 `apikey`와 Bearer 헤더 양쪽에 사용한다. `anon`/publishable 키는 이 서버 전용 저장소에 사용하지 않는다. 새 `sb_secret_...` 키를 도입하려면 헤더 처리 호환성을 별도 확인한다.
+5. 앱은 브라우저에서 Supabase를 직접 호출하지 않고 FastAPI를 거쳐 접근한다. `documents`에는 RLS를 활성화하고 `service_role`에 스키마 USAGE와 SELECT·INSERT·UPDATE·DELETE를 허용한다. `anon`/`authenticated`용 공개 접근 권한·전체 허용 정책을 추가하지 않는다. 소유자 격리는 백엔드의 해시된 데모 세션 토큰과 owner 필터가 담당한다.
+
+필요한 테이블 구조:
+
+| 열 | 형식 | 조건 |
+| --- | --- | --- |
+| `owner` | text | NOT NULL, 세션 소유자 해시 |
+| `kind` | text | NOT NULL, identity/thread/memory/saved/run/subscription/notification |
+| `id` | text | NOT NULL |
+| `data` | jsonb | NOT NULL |
+| `updated_at` | timestamptz | NOT NULL, 기본값 now() |
+
+기본키는 `(owner, kind, id)`이며 `(owner, kind, updated_at desc)` 인덱스를 사용한다. 저장 데이터가 기존 SQLite에 있다면 이 설정 변경만으로 Supabase로 이관되지는 않는다.
+
+### Vercel API 주소 설정
+
+Vercel의 해당 프로젝트 → Settings → Environment Variables에 다음 항목을 등록한다.
+
+```dotenv
+VITE_API_BASE_URL=https://meet-again-ghbye-api.onrender.com/api/v1
+```
+
+Environment는 Production을 선택하며 Preview에서도 검색할 경우 Preview에도 적용한다. 저장 후 최신 프론트엔드 코드로 Redeploy한다. `/api/v1`을 중복으로 덧붙이지 않는다. Supabase 서버 키·OpenAI 키·동물 API 키는 Vercel 프론트엔드 변수에 넣지 않는다.
+
+### 전환 완료 검증
+
+`/api/v1/health`의 `mode=live`, `storage=supabase`, 최신 코드의 `animal_data_source=api`를 확인한다. health는 설정 상태만 반환하므로 OpenAI·Supabase 연결 성공을 보장하지 않는다. 실제 검색에서 OpenAI 계획 생성·공고 조회가 성공하고, 검색 저장 후 다시 불러와 Supabase 쓰기·읽기를 확인해야 전환 완료로 판단한다.
+
+공식 참고: [Supabase 사용자 지정 스키마](https://supabase.com/docs/guides/api/using-custom-schemas), [Supabase API 권한과 RLS](https://supabase.com/docs/guides/api/securing-your-api), [OpenAI API 인증](https://developers.openai.com/api/reference/overview), [Vercel 환경변수](https://vercel.com/docs/environment-variables).
+
+## 17. OpenAI 계획 생성 오류의 원인 구분 (2026-11-11)
+
+사용자에게 표시된 `OpenAI 계획 생성 실패: 모델 접근 권한·API 키·응답을 확인하세요.`는 기존 코드가 여러 예외를 같은 문장으로 처리한 결과다. 이 메시지만으로 인증키 오류·모델 권한·사용 한도 중 원인을 단정하지 않는다.
+
+확인 결과:
+
+- Render 배포 `dep-dbpf1ijm8hqs73dnti7g`는 live이며 공개 health에서 `mode=live`, `storage=supabase`, `model=gpt-6-luna`를 확인했다. 이전 환경변수 누락으로 서버 시작이 실패한 상황과 구분한다.
+- 배포 커밋은 여전히 `4b7bfaaddb70521c4d3937749d9908890a830254`이고 공개 health에 `animal_data_source`는 없었다.
+- 로컬 `.env`의 OpenAI 키로 동일한 계획 요청을 한 번 실행했을 때 HTTP 401 / `invalid_api_key`가 반환됐다. 로컬 키는 교체가 필요하다. Render에 설정된 키가 로컬과 같다고 확인한 것은 아니며, Render 로그에서도 실제 OpenAI 오류 코드가 확인되지 않았다.
+
+`backend/tools.py`의 Planner를 수정해 아래 오류를 구분한다.
+
+| 오류 코드 | 의미와 조치 |
+| --- | --- |
+| `llm_auth` | HTTP 401. 백엔드 `OPENAI_API_KEY`를 유효한 키로 교체하고 새 배포에 반영 |
+| `llm_permission` | HTTP 403. 프로젝트·키의 모델 및 요청 권한 확인 |
+| `llm_model` | HTTP 404. `OPENAI_MODEL` 이름과 해당 프로젝트의 모델/리소스 접근 확인 |
+| `llm_quota` | HTTP 429와 확인된 크레딧·지출·사용 한도 코드. 결제와 한도를 확인 |
+| `llm_rate_limit` | 그 외 HTTP 429. 오류 코드·호출 한도를 확인하고 제한된 재시도 |
+| `llm_timeout` / `llm_network` | 응답 시간 초과 / 통신 실패 |
+| `llm_request` / `llm_upstream` | 요청 설정 오류 / OpenAI 서버 오류 |
+| `llm_response` | 미완료 응답·JSON 오류·잘못된 도구 목록 또는 근거 형식 |
+
+화면과 실행 결과에는 분류된 오류와 조치만 전달한다. 서버 로그에는 HTTP 상태·허용된 오류 코드·형식을 확인한 request ID만 기록하며, 원본 SDK 예외 메시지·응답 본문·인증키는 출력하지 않는다. 모델을 임의로 변경하거나 샘플 데이터로 우회하지 않는다.
+
+검증: HTTP 오류·네트워크 오류·응답 형식·키 비노출을 포함해 백엔드 테스트 **44개 통과**. 이번 코드 수정은 로컬에 있으며 Render에 배포하지 않았다. Render 원인을 구분하려면 최신 코드를 배포한 뒤 새 검색의 구체적인 오류 또는 정제된 로그를 확인한다.
+
+참고: [OpenAI 공식 오류 코드 안내](https://developers.openai.com/api/docs/guides/error-codes).
+
+## 18. Redis 기반 사용자 로그인 추가 (2026-11-11)
+
+사용자의 새 요청에 따라 기존 로그인 생략·익명 데모 인증 요구를 회원가입/로그인 기능으로 대체한다.
+
+구현한 화면과 기능:
+
+- 루트 페이지 오른쪽 위에 로그인 버튼을 추가하고 `/login`으로 이동시킨다. 로그인 후 사용자 이름과 로그아웃 버튼을 표시한다.
+- `/login`에 이메일·비밀번호 로그인과 이름·이메일·비밀번호 회원가입 폼을 제공한다. 비밀번호 표시 전환, 입력 검증, 처리 중 상태, 오류 안내, 홈으로 돌아가기를 지원한다.
+- 로그인 성공 시 루트로 이동하고 새로고침 시 `/auth/me`로 로그인 상태를 복원한다. 인증 만료 시 로그인 화면으로 이동한다. 로그아웃/계정 전환 시 이전 계정 화면 상태를 초기화한다.
+- 검색·저장 검색·기억·실행 이력·알림은 로그인 사용자 UUID를 기준으로 격리한다. 익명 `POST /api/v1/sessions`와 기존 Bearer 데모 토큰은 인증에 사용하지 않는다.
+
+백엔드 구성:
+
+- 신규 `backend/auth.py`: Argon2 비밀번호 해시, 회원가입·로그인·현재 사용자·로그아웃 API.
+- 계정은 기존 SQLite 또는 Supabase `documents`의 `identity/account` 문서에 저장한다. 정규화한 이메일의 SHA-256으로 계정 문서 소유자 키를 만들고 create-only 저장으로 중복 가입을 막는다. 기존 스키마의 `identity` 종류를 재사용하므로 DB DDL 변경은 필요 없다.
+- Redis에는 세션과 로그인 호출 제한만 저장한다. 세션 원문은 임의의 32바이트 토큰이며 Redis 키에는 SHA-256만 사용한다. 기본 TTL은 24시간이고 로그인 시 현재 브라우저의 기존 세션을 회전하며 로그아웃 시 폐기한다.
+- 브라우저 인증은 HttpOnly 쿠키(`meet_again_session`, Path=/api/v1)로 처리한다. 토큰을 응답 JSON이나 localStorage에 저장하지 않는다. API는 no-store 응답과 credentialed CORS를 적용하고 변경 요청의 Origin을 검사한다.
+- Redis 연결 실패 시 503으로 응답하고 인증을 우회하지 않는다. 잘못된 로그인은 이메일 존재 여부와 관계없이 같은 메시지를 표시한다. 잘못된 입력의 422 응답에도 비밀번호 등 원본 입력값을 포함하지 않는다.
+
+새 환경변수:
+
+```dotenv
+# Render: 로그인 전용 Key Value의 Internal URL. 실제 URL은 서버에만 설정한다.
+REDIS_URL=redis://로그인용_redis_호스트:6379/0
+AUTH_SESSION_TTL_SECONDS=86400
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=lax
+```
+
+로컬에는 저장소 루트에서 `docker compose up -d redis`로 전용 Redis를 실행하고 `REDIS_URL=redis://127.0.0.1:6380/0`을 사용한다. HTTP 개발 환경에서는 `AUTH_COOKIE_SECURE=false`로 지정한다. Secure 기본값은 APP_MODE가 live이면 true, local이면 false다. Redis 7 이상 또는 호환 Valkey가 필요하다. 자격 증명이 포함된 Redis URL은 프론트엔드나 저장소에 기록하지 않는다.
+
+Vercel 배포 설정 변경:
+
+```dotenv
+VITE_API_BASE_URL=/api/v1
+```
+
+기존 절의 Render 절대 API 주소 설정은 이번 쿠키 인증 구성에서는 위 상대 경로로 변경한다. `frontend/vercel.json`의 `/api/v1/:path*` rewrite가 기존 Render API를 프록시해 같은 사이트의 쿠키로 인증하고 `/login` 새로고침은 index.html로 처리한다. 백엔드의 허용 origin에는 `https://vibe-codeing-demo.vercel.app`을 유지한다. 프론트엔드·백엔드 모두 최신 코드를 배포해야 한다.
+
+Render 연결 조회에서는 다른 프로젝트의 `house-tour-notes-kv`만 확인되어 재사용하거나 변경하지 않았다. 로그인 전용 Key Value 생성·REDIS_URL 등록·원격 서비스 배포는 이번 코드 작업에서 수행하지 않았다. 기존 SQLite 익명 기록은 회원 계정으로 자동 이관하지 않는다. 이메일 인증·비밀번호 재설정·계정 삭제·모든 기기 로그아웃은 후속 범위다.
+
+검증 결과:
+
+- 백엔드 테스트 **53개 통과**. Redis 호환 모의 서버를 사용해 쿠키·비밀번호 해시·만료·회전·로그아웃·중복 가입·사용자 격리·호출 제한·CSRF·Redis 장애·비밀번호 비노출과 기존 검색을 검증했다.
+- 프론트엔드 프로덕션 빌드 통과.
+- 별도 로컬 Vite/API와 테스트 DB에서 HTTP로 루트·로그인 경로 200, 회원가입 201, 로그인 사용자·개인 이력 200, 로그아웃 204, 로그아웃 후 401을 확인했다. 테스트 API는 운영과 구분된 모의 Redis를 주입했다.
+- 브라우저 직접 시각 검증은 자동화 앱 접근 승인 시간 초과로 완료하지 못했다. 실제 Redis/Render/Vercel 환경의 배포 후 로그인 검증은 아직 수행하지 않았다.
+
+참고: [Redis asyncio 연결](https://redis.readthedocs.io/en/stable/examples/asyncio_examples.html), [FastAPI 비밀번호 해싱](https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt/), [Vercel rewrites](https://vercel.com/docs/rewrites).
+
+## 19. 로컬 회원가입 403 수정 (2026-11-11)
+
+- 사용자가 접속한 주소는 `http://127.0.0.1:5173/login`이다. 로컬 `.env`의 `CORS_ORIGINS`에는 `http://localhost:5173`만 있어 회원가입 POST가 Origin 검사에서 403으로 차단되는 것을 재현했다.
+- 로컬 `.env`의 기존 origin을 유지하면서 `http://127.0.0.1:5173`을 추가했다. `.env.example`에도 두 로컬 주소를 포함했다. 와일드카드나 임의 포트 허용으로 보안 검사를 우회하지 않는다.
+- 로컬 `.env`가 `APP_MODE=live`여서 기본 쿠키가 Secure=true였다. HTTP 로컬 개발에서 로그인 쿠키를 사용할 수 있도록 이 로컬 파일에만 `AUTH_COOKIE_SECURE=false`를 설정했다. Render 운영에서는 계속 true를 사용한다.
+- 차단 응답에 `code=origin_not_allowed`와 `CORS_ORIGINS` 확인 안내를 추가했다.
+- 변경 전 같은 Origin의 빈 회원가입 요청은 403이었다. 변경 후 사전 요청은 200, 빈 POST는 422(입력 검증에 도달), 임의 외부 Origin은 계속 403임을 확인했다. 실행 중인 로컬 `127.0.0.1:8000` 서버에서도 동일한 빈 요청이 422이며 올바른 CORS 응답을 반환했다. 실제 계정은 이 진단에서 생성하지 않았다.
+- 백엔드 회귀 테스트 **54개 통과**.
+
+## 20. 로컬 회원가입 503과 Redis 실행 설정 (2026-11-11)
+
+- 화면의 `로그인 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.`와 회원가입 503은 인증 처리 중 Redis 연결 실패로 발생했다. 로컬 Docker Desktop이 실행되지 않았고, `.env`는 `127.0.0.1:6379`를 가리키고 있었다.
+- Docker Desktop 실행 후 기존 다른 프로젝트의 Valkey가 6379 포트를 사용하고 있음을 확인했다. 이 프로젝트에는 별도 컨테이너 `meet-again-redis`와 호스트 포트 6380을 구성했다.
+- 루트 `compose.yaml`에 Redis 8, 로컬 인터페이스에만 공개하는 포트 `127.0.0.1:6380:6379`, AOF 영속화와 전용 볼륨, 상태 확인, 재시작 정책을 추가했다. `restart: unless-stopped`는 Docker 엔진이 실행된 상태에서 적용된다.
+- 로컬 `.env`, `.env.example`, 백엔드 기본값의 `REDIS_URL`을 `redis://127.0.0.1:6380/0`으로 맞췄다. APP_MODE=live와 STORAGE_BACKEND=supabase는 유지했다. README에 실행·상태 확인 방법을 추가했다.
+
+```powershell
+docker compose up -d redis
+docker compose ps
+docker compose exec redis redis-cli ping
+```
+
+- 컨테이너 상태 `healthy`, Redis `PONG`, 앱 설정으로 연결한 Redis PING 및 호출 제한 트랜잭션 성공을 확인했다.
+- 실행 중인 로컬 `http://127.0.0.1:8000` API에 존재하지 않는 임의 이메일로 로그인했을 때 503 대신 정상적인 인증 실패 401이 반환됐다. 이는 Redis 호출과 계정 저장소 조회가 처리되었음을 확인하는 진단이며 실제 사용자 계정을 생성하지 않았다.
+- 실제 Redis의 별도 논리 DB와 임시 SQLite 계정 DB를 사용한 통합 확인에서 회원가입 201, 현재 사용자 조회 200, 로그아웃 204, 로그아웃 후 조회 401을 확인했다. 진단용 세션·호출 제한 키와 임시 계정 DB를 정리했다. 실제 Supabase 계정 생성은 이 검증에 포함하지 않았다.
+- 이번 수정은 로컬 실행 환경에 적용했다. Render의 REDIS_URL은 별도 운영 Key Value 연결 URL을 사용해야 하며, 로컬 6380 주소를 Render에 입력하지 않는다.
+
+## 21. Vercel 배포에서 백엔드 연결 실패 진단 (2026-11-11)
+
+사용자 접속 주소: `https://vibe-codeing-demo-d6da1ptxi-aio-03-p2-team1.vercel.app/`. 화면 메시지는 `서버에 연결하지 못했습니다. 백엔드가 실행 중인지 확인해 주세요.`다. 이 일반적인 화면 메시지만으로 서버 중단이라고 단정하지 않는다.
+
+직접 확인한 원격 상태:
+
+- Render `https://meet-again-ghbye-api.onrender.com/api/v1/health`는 HTTP 200이며 mode=live, storage=supabase다. 서버 자체는 응답한다.
+- 위 Vercel 주소를 Origin으로 한 Render 사전 요청은 HTTP 400 / `Disallowed CORS origin`이다. 기존 운영 주소 `https://vibe-codeing-demo.vercel.app`의 사전 요청은 200이다. 새 주소에서 Render를 직접 호출하면 브라우저가 응답 접근을 차단한다.
+- 새 Vercel 주소의 루트와 `/api/v1/health`는 외부 비로그인 요청을 Vercel SSO로 302 리다이렉트한다. 보호된 배포의 실제 앱 번들과 요청 주소는 확인하지 못했다. 배포 보호를 해제할 필요가 있다고 단정하지 않으며 실제 브라우저의 Network로 경로를 확인한다.
+- 기존 운영 Vercel 주소에서는 `/api/v1/health`가 HTTP 404다. 공개 앱 번들은 `/api/v1`을 사용하고 있으나 현재 운영 배포에 API 프록시가 적용되지 않은 상태다. 새 보호된 배포에도 같은 상태라고 단정하지 않는다.
+- Render `/api/v1/auth/me`는 HTTP 404다. 현재 live 배포는 `dep-dbprbgt9fdbs73f7q1lg`, 커밋 `4b7bfaaddb70521c4d3937749d9908890a830254`, 연결 브랜치는 `codex/meet-again-demo`다. 로컬 로그인 구현과 ANIMAL_API 데이터 출처 필드가 아직 배포되지 않았다.
+- 로컬 Git에서 `frontend/vercel.json`, `backend/auth.py` 등은 아직 추적되지 않는 새 파일이다. 파일을 로컬에 생성하는 것만으로 Git 기반 배포에 반영되지 않는다.
+
+최신 구현을 배포할 때 적용할 구성:
+
+1. Vercel 프로젝트 Root Directory를 `frontend`로 설정하고 `frontend/vercel.json`이 배포 소스에 포함되게 한다. 이 파일의 `/api/v1/:path*` rewrite가 Render API로 전달하고 `/login`은 index.html로 전달한다.
+2. Vercel에서 실제 배포 대상 환경(Production 및 Preview를 사용하는 경우 Preview)에 `VITE_API_BASE_URL=/api/v1`을 설정하고 새로 빌드·배포한다. 환경변수만 저장하거나 로컬 `.env`만 수정한 상태로 완료 처리하지 않는다.
+3. Render의 기존 `CORS_ORIGINS` 목록을 보존하면서 사용 중인 Vercel 주소를 추가한다. 쿠키 인증에서도 변경 요청의 Origin 검사가 있으므로 같은 도메인 프록시를 사용해도 실제 프론트엔드 Origin은 허용되어 있어야 한다. 임의의 `*.vercel.app` 전체를 허용하지 않는다.
+
+```dotenv
+# 아래 두 주소를 기존 허용 목록에 추가 또는 병합한다.
+CORS_ORIGINS=https://vibe-codeing-demo.vercel.app,https://vibe-codeing-demo-d6da1ptxi-aio-03-p2-team1.vercel.app
+AUTH_COOKIE_SECURE=true
+AUTH_COOKIE_SAMESITE=lax
+# REDIS_URL에는 운영용 Redis/Render Key Value 연결 URL을 설정한다.
+```
+
+4. 운영용 Redis를 연결한 뒤 인증 구현·의존성·잠금 파일을 포함한 최신 백엔드 코드를 Render 연결 브랜치에 반영하여 배포한다. 로컬 `127.0.0.1:6380`은 Render에서 사용할 수 없다. 기존 OpenAI·동물 API·Supabase 설정은 보존한다.
+5. 완료 검증: Vercel `/api/v1/health`가 HTML이나 404 대신 JSON 200, 비로그인 `/api/v1/auth/me`가 404 대신 401, 실제 회원가입과 로그인 유지가 정상인지 확인한다. 프록시와 CORS만 고친 상태로 최신 로그인 배포가 완료되었다고 보고하지 않는다.
+
+이번 진단에서는 원격 환경변수 변경·Git push·Vercel/Render 재배포를 수행하지 않았다. 로컬 프록시 설정은 준비되어 있으나 실제 배포 반영은 남아 있다.
+
+참고: [Vercel rewrites](https://vercel.com/docs/routing/rewrites), [Vercel 배포 환경](https://vercel.com/docs/deployments/environments), [Render 환경변수 반영](https://render.com/docs/configure-environment-variables).

@@ -186,7 +186,7 @@ def build_graph(settings, tools, planner):
 
     async def finish(state):
         failed = state.get("errors") and not state.get("verified")
-        return {"status": "failed" if failed else state.get("status", "failed"), "candidates": [] if failed else state.get("candidates", []), "elapsed_ms": round((time.monotonic() - state["started"]) * 1000), "traces": trace(state, "finish", "실행 종료 · 샘플" if settings.app_mode == "local" else "실행 종료 · 실제 API")}
+        return {"status": "failed" if failed else state.get("status", "failed"), "candidates": [] if failed else state.get("candidates", []), "elapsed_ms": round((time.monotonic() - state["started"]) * 1000), "traces": trace(state, "finish", "실행 종료 · 샘플" if settings.animal_data_source == "sample" else "실행 종료 · 실제 API")}
 
     graph = StateGraph(SearchState)
     for name, node in (("validate", validate), ("context", context), ("plan", plan), ("execute", execute), ("verify", verify), ("reflect", reflect), ("enrich", enrich), ("finish", finish)):

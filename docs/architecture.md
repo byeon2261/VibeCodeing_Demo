@@ -54,7 +54,7 @@ flowchart TD
 
 `tool_calls`에는 입력 코드 검증용 시도 목록 조회와 OpenAI 호출은 포함하지 않습니다. 토큰은 성공한 계획 응답에서 제공한 값만 집계하며 실패한 모델 요청의 비용은 측정하지 않습니다. `elapsed_ms`는 후속 알림 발송 시간을 제외합니다.
 
-추가 저장 필드: `profile_id`, `created_at`, `mode`. 상태는 `completed`, `partial`, `failed`, `awaiting_input` 중 하나로 종료됩니다. 전체 요청 한도 기본 60초, 성찰 최대 2회, 검색 최대 3페이지, 그래프 재귀 한도 35, 도구 호출 예산 기본 30입니다.
+추가 저장 필드: `profile_id`, `created_at`, `mode`, `animal_data_source`. `animal_data_source`는 키 설정에 따라 `api`/`sample`로 결정하고 상태 API에도 반환합니다. `mode=local`이어도 동물 API 키가 있으면 실제 공고를 조회하며 규칙 기반 계획·로컬 저장·알림 미발송을 사용합니다. 상태는 `completed`, `partial`, `failed`, `awaiting_input` 중 하나로 종료됩니다. 전체 요청 한도 기본 60초, 성찰 최대 2회, 검색 최대 3페이지, 그래프 재귀 한도 35, 도구 호출 예산 기본 30입니다.
 
 ## 기억과 영속성
 
@@ -72,7 +72,11 @@ flowchart TD
 
 `documents(owner, kind, id, data jsonb, updated_at)`가 데모의 논리 저장소입니다. kind는 identity, thread, memory, saved, run, subscription, notification입니다. 각 API는 owner 조건을 반드시 포함합니다. 단일 테이블은 데모 구현을 단순화하기 위한 선택이며 규모가 커지면 정규화된 테이블·인덱스·보존 기간으로 분리해야 합니다.
 
-서버가 token_urlsafe(32)를 발급하며 원문은 브라우저 localStorage에만, 서버에는 SHA-256 해시만 저장합니다. 로그인·정식 계정 복구 기능은 아닙니다. Supabase Data API는 서버 전용 역할만 허용합니다. rate limit·소유자 동시 실행 잠금은 단일 프로세스 메모리에 있고 다중 인스턴스 분산 제한은 미구현입니다. 토큰·문서의 자동 만료·청소는 후속 범위입니다.
+회원가입 계정은 `owner=account:<정규화 이메일 SHA-256>`, `kind=identity`, `id=account` 문서에 저장합니다. 기존 복합 기본키의 create-only 연산으로 이메일 중복을 방지하고 비밀번호는 Argon2로 해시합니다. 로그인 세션은 `token_urlsafe(32)` 토큰의 SHA-256만 Redis 키에 사용하며 사용자 ID·이메일·이름과 TTL(기본 24시간)을 저장합니다. 원문 토큰은 HttpOnly 쿠키로만 전달하고 응답 JSON·localStorage에 넣지 않습니다. Redis 실패 시 인증을 허용하지 않습니다.
+
+이후 문서 소유자는 `user:<회원 UUID>`입니다. 로그인 시 기존 브라우저 세션을 회전하고 로그아웃 시 Redis 키를 삭제합니다. 로그인·회원가입 호출 제한은 Redis 트랜잭션으로 공유하고 비밀번호 해시 작업은 프로세스당 동시 2개로 제한합니다. 검색 rate limit·소유자 동시 실행 잠금은 여전히 단일 프로세스 메모리입니다. Supabase Data API는 서버 전용 역할만 허용합니다. 기존 익명 기록 자동 이관·이메일 인증·비밀번호 재설정·계정 삭제는 구현하지 않았습니다.
+
+Vercel은 `frontend/vercel.json`으로 `/api/v1/*`를 Render에 프록시합니다. 프론트엔드 API 기본 경로는 `/api/v1`, fetch는 `credentials=include`를 사용합니다. 운영 쿠키는 Secure·HttpOnly·SameSite=Lax, 로컬 HTTP에서는 Secure=false를 사용합니다. 서버는 CORS credentials와 변경 요청의 Origin을 검사하고 API 응답을 no-store로 설정합니다.
 
 알림 claim은 `(owner, kind, id)` 고유키로 원자적으로 생성합니다. 발송 중 프로세스가 종료되면 pending 상태가 남을 수 있으며 정확히 한 번 전달을 보장하지 않습니다. 운영용 영속 큐·수신 콜백·자동 복구는 후속 범위입니다. 실패·수락 불명 상태를 자동 재발송하지 않아 중복을 줄입니다.
 
@@ -80,8 +84,8 @@ flowchart TD
 
 | 도구 | 입력 | 출력 |
 | --- | --- | --- |
-| 시도 조회 | 없음 | 공식 코드·명칭. live: `sido_v2` |
-| 공고 검색 | 지역·기간·종류, 페이지 상한 | 정규화 후보·조회 범위. live: `abandonmentPublic_v2` |
+| 시도 조회 | 없음 | 공식 코드·명칭. animal_data_source=api: `sido_v2` |
+| 공고 검색 | 지역·기간·종류, 페이지 상한 | 정규화 후보·조회 범위. animal_data_source=api: `abandonmentPublic_v2` |
 | 보호센터 확인 | 공고 원본 후보 | 원 응답의 careNm·careTel·careAddr, 별도 가짜 endpoint 없음 |
 | 위치 확인 | 보호센터 주소 | Kakao Local 좌표 또는 주소·실패 이유 |
 
@@ -89,12 +93,15 @@ flowchart TD
 
 ## API
 
-공통 접두어 `/api/v1`. sessions, health, regions 외에는 `Authorization: Bearer <데모 토큰>` 필요. 요청 모델과 응답은 실행 서버 `/docs`, `/openapi.json`에서 확인합니다.
+공통 접두어 `/api/v1`. health, regions, auth/register, auth/login 외에는 로그인 쿠키가 필요합니다(logout은 이미 만료된 쿠키도 정리 가능). Swagger에서 register/login을 실행하면 같은 브라우저의 검색 요청에도 쿠키가 자동 전달됩니다. 익명 `/sessions`와 Bearer 데모 토큰은 폐지했습니다. 요청 모델과 응답은 실행 서버 `/docs`, `/openapi.json`에서 확인합니다.
 
 | 메서드 | 경로 | 동작·주요 입력 |
 | --- | --- | --- |
 | GET | /health | 실행 모드·저장소·모델·지원 채널 |
-| POST | /sessions | 토큰 발급 (201) |
+| POST | /auth/register | 이메일·비밀번호·이름으로 회원가입 및 로그인 (201) |
+| POST | /auth/login | 이메일·비밀번호 검증 후 쿠키 발급 |
+| GET | /auth/me | 현재 로그인 사용자 |
+| POST | /auth/logout | Redis 세션 폐기 및 쿠키 삭제 (204) |
 | GET | /regions | 시도 이름·코드 |
 | POST | /searches | conditions, reflection, include_location, use_memory, thread_id, profile_id |
 | GET | /runs | 소유자의 최근 실행 최대 100개 |
